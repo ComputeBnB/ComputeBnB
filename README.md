@@ -224,13 +224,19 @@ Why Python:
 
 ### Client
 
-Use a browser-based UI with plain HTML, CSS, and JavaScript.
+Use a browser-based UI served by FastAPI.
 
 Why:
 - no frontend framework setup overhead
+- easy to serve HTML templates and static assets from the same app
+- simple local GUI story for a hackathon demo
 - no desktop packaging work
 - easiest way to stay cross-platform
 - fast to demo
+
+Recommended pieces:
+- `FastAPI`
+- server-rendered templates or simple static HTML, CSS, and JavaScript
 
 ### Container Runtime
 

@@ -36,7 +36,8 @@ Out of scope unless explicitly requested:
 - `zeroconf` for mDNS
 - `asyncio` or `socket` for TCP
 - `subprocess` for Docker and fallback execution
-- plain `HTML/CSS/JS` for the UI
+- `FastAPI` for the local GUI and API surface
+- simple `HTML/CSS/JS` templates or static assets for the UI
 - Docker image: `python:3.11-slim`
 
 ## Terminology
