@@ -101,11 +101,20 @@ async def run_guest():
     except (ValueError, IndexError):
         print("Invalid selection.")
         return
-    code = input("Enter Python code to run on host: ")
+
+    file_path = input("Enter path to Python file to run on host: ").strip()
+    if not os.path.isfile(file_path):
+        print(f"File not found: {file_path}")
+        return
+    with open(file_path, "r", encoding="utf-8") as f:
+        code = f.read()
+    filename = os.path.basename(file_path)
+
     # Send job request (simplified, assumes direct API call)
     import requests
     req = {
         "code": code,
+        "filename": filename,
         "guest_name": platform.node(),
     }
     url = f"http://{host.host}:{host.port}/jobs/request"
