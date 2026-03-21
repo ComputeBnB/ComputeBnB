@@ -43,6 +43,7 @@ export interface Job {
   hasRequirementsTxt?: boolean;
   projectFiles?: ProjectFileUpload[];
   chargeEnabled?: boolean;
+  chargeFinalized?: boolean;
   chargeRateUsdPerHour?: number;
   totalChargeUsd?: number;
   balanceDueUsd?: number;
@@ -65,6 +66,7 @@ export interface JobResult {
   output: string;
   generatedFiles: ProjectFileUpload[];
   chargeEnabled: boolean;
+  chargeFinalized: boolean;
   chargeRateUsdPerHour: number;
   totalChargeUsd: number;
   balanceDueUsd: number;
@@ -103,6 +105,7 @@ export interface ActiveJob {
   runtime?: string;
   started_at?: string;
   charge_enabled?: boolean;
+  charge_finalized?: boolean;
   charge_rate_usd_per_hour?: number;
   total_charge_usd?: number;
   balance_due_usd?: number;

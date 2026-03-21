@@ -158,7 +158,7 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                   <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
                     <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-app-text-secondary">
                       <DollarSign size={12} className="text-emerald-400" />
-                      Compute Value
+                      {activeJob.charge_finalized ? 'Final Charge' : 'Estimated Charge'}
                     </div>
                     <div className="mt-2 text-2xl font-bold font-mono text-app-text">
                       {formatUsd(activeJob.total_charge_usd)}
@@ -169,13 +169,17 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                   </div>
                   <div className="rounded-lg border border-app-border bg-app-bg p-3">
                     <div className="text-xs uppercase tracking-wide text-app-text-secondary">
-                      Balance Due
+                      Amount Due
                     </div>
                     <div className="mt-2 text-2xl font-bold font-mono text-app-text">
-                      {formatUsd(activeJob.balance_due_usd)}
+                      {activeJob.charge_finalized ? formatUsd(activeJob.balance_due_usd) : '--'}
                     </div>
                     <div className="mt-1 text-xs text-app-text-tertiary">
-                      {activeJob.payment_status === 'paid' ? 'Settled' : 'Awaiting guest payment'}
+                      {activeJob.charge_finalized
+                        ? activeJob.payment_status === 'paid'
+                          ? 'Settled'
+                          : 'Awaiting guest payment'
+                        : 'Charge applies only after completion'}
                     </div>
                   </div>
                   <div className="rounded-lg border border-app-border bg-app-bg p-3">
@@ -183,12 +187,18 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                       Payment Status
                     </div>
                     <div className={`mt-2 text-sm font-semibold ${activeJob.payment_status === 'paid' ? 'text-green-400' : 'text-yellow-300'}`}>
-                      {activeJob.payment_status === 'paid' ? 'Payment received' : 'Payment pending'}
+                      {activeJob.charge_finalized
+                        ? activeJob.payment_status === 'paid'
+                          ? 'Payment received'
+                          : 'Payment pending'
+                        : 'Pending completion'}
                     </div>
                     <div className="mt-1 text-xs text-app-text-tertiary">
                       {activeJob.payment_received_at
                         ? `Received at ${formatTime(activeJob.payment_received_at)}`
-                        : 'Guest can pay after the run completes'}
+                        : activeJob.charge_finalized
+                          ? 'Guest can pay after the run completes'
+                          : 'No charge is due until the job finishes'}
                     </div>
                   </div>
                 </div>

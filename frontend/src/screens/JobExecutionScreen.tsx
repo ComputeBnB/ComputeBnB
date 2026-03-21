@@ -170,7 +170,7 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
               <div className="flex items-center gap-2 mb-2">
                 <DollarSign size={16} className="text-emerald-400" />
                 <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
-                  Compute Charge
+                  Estimated Charge
                 </span>
               </div>
               <div className="text-2xl font-bold text-app-text font-mono">
@@ -180,7 +180,7 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
                 ${chargeRateUsdPerHour.toFixed(2)}/hr billed by the host
               </div>
               <div className="text-xs text-app-text-tertiary mt-1">
-                Includes a $0.25 minimum demo charge
+                Final amount is charged only after the job completes
               </div>
             </div>
           )}

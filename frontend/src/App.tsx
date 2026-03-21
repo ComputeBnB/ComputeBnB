@@ -173,6 +173,7 @@ function App() {
         hasRequirementsTxt: jobData.hasRequirementsTxt,
         projectFiles: jobData.projectFiles,
         chargeEnabled: false,
+        chargeFinalized: false,
         chargeRateUsdPerHour: 0,
         totalChargeUsd: 0,
         balanceDueUsd: 0,
@@ -228,8 +229,9 @@ function App() {
               ? {
                   ...prev,
                   chargeEnabled,
+                  chargeFinalized: false,
                   chargeRateUsdPerHour,
-                  paymentStatus: chargeEnabled ? "payment_due" : "not_required",
+                  paymentStatus: "not_required",
                 }
               : prev,
           );
@@ -329,6 +331,7 @@ function App() {
             output: collectedOutput.join(""),
             generatedFiles: [...collectedGeneratedFiles],
             chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+            chargeFinalized: msg.charge_finalized ?? true,
             chargeRateUsdPerHour:
               msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
             totalChargeUsd: msg.total_charge_usd ?? 0,
@@ -343,6 +346,7 @@ function App() {
               ? {
                   ...prev,
                   chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+                  chargeFinalized: msg.charge_finalized ?? true,
                   chargeRateUsdPerHour:
                     msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
                   totalChargeUsd: msg.total_charge_usd ?? 0,
@@ -372,6 +376,7 @@ function App() {
             output: collectedOutput.join(""),
             generatedFiles: [...collectedGeneratedFiles],
             chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+            chargeFinalized: msg.charge_finalized ?? true,
             chargeRateUsdPerHour:
               msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
             totalChargeUsd: msg.total_charge_usd ?? 0,
@@ -386,6 +391,7 @@ function App() {
               ? {
                   ...prev,
                   chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+                  chargeFinalized: msg.charge_finalized ?? true,
                   chargeRateUsdPerHour:
                     msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
                   totalChargeUsd: msg.total_charge_usd ?? 0,
@@ -534,6 +540,7 @@ function App() {
         prev
           ? {
               ...prev,
+              chargeFinalized: true,
               paid: payment.paid,
               balanceDueUsd: payment.balance_due_usd,
               totalChargeUsd: payment.total_charge_usd ?? prev.totalChargeUsd,
@@ -545,6 +552,7 @@ function App() {
         prev
           ? {
               ...prev,
+              chargeFinalized: true,
               paid: payment.paid,
               balanceDueUsd: payment.balance_due_usd,
               totalChargeUsd: payment.total_charge_usd ?? prev.totalChargeUsd,

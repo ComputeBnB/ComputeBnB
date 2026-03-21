@@ -271,6 +271,7 @@ class HostingService:
     def _payment_payload(self, job_snapshot: dict) -> dict:
         return {
             "charge_enabled": bool(job_snapshot.get("charge_enabled", False)),
+            "charge_finalized": bool(job_snapshot.get("charge_finalized", False)),
             "charge_rate_usd_per_hour": float(job_snapshot.get("charge_rate_usd_per_hour", 0.0)),
             "total_charge_usd": self._round_currency(float(job_snapshot.get("total_charge_usd", 0.0))),
             "balance_due_usd": self._round_currency(float(job_snapshot.get("balance_due_usd", 0.0))),
@@ -287,15 +288,20 @@ class HostingService:
             elapsed_seconds,
             float(self.active_job.get("charge_rate_usd_per_hour", 0.0)),
         )
-        balance_due_usd = 0.0 if self.active_job.get("paid") else total_charge_usd
-
         self.active_job["total_charge_usd"] = total_charge_usd
-        self.active_job["balance_due_usd"] = self._round_currency(balance_due_usd)
-        self.active_job["payment_status"] = self._payment_status(
-            charge_enabled,
-            bool(self.active_job.get("paid", False)),
-            balance_due_usd,
-        )
+        self.active_job["charge_finalized"] = final
+
+        if final:
+            balance_due_usd = 0.0 if self.active_job.get("paid") else total_charge_usd
+            self.active_job["balance_due_usd"] = self._round_currency(balance_due_usd)
+            self.active_job["payment_status"] = self._payment_status(
+                charge_enabled,
+                bool(self.active_job.get("paid", False)),
+                balance_due_usd,
+            )
+        else:
+            self.active_job["balance_due_usd"] = 0.0
+            self.active_job["payment_status"] = "paid" if self.active_job.get("paid") else "not_required"
 
         if final:
             self.active_job["completed_at"] = datetime.now().isoformat()
@@ -323,12 +329,9 @@ class HostingService:
                 float(job_snapshot.get("charge_rate_usd_per_hour", 0.0)),
             )
             job_snapshot["total_charge_usd"] = total_charge_usd
-            job_snapshot["balance_due_usd"] = 0.0 if job_snapshot.get("paid") else total_charge_usd
-            job_snapshot["payment_status"] = self._payment_status(
-                bool(job_snapshot.get("charge_enabled", False)),
-                bool(job_snapshot.get("paid", False)),
-                float(job_snapshot.get("balance_due_usd", 0.0)),
-            )
+            job_snapshot["charge_finalized"] = False
+            job_snapshot["balance_due_usd"] = 0.0
+            job_snapshot["payment_status"] = "paid" if job_snapshot.get("paid") else "not_required"
 
         job_snapshot.pop("started_at_ts", None)
         return {
@@ -599,8 +602,9 @@ class HostingService:
             "charge_rate_usd_per_hour": request.charge_rate_usd_per_hour,
             "total_charge_usd": 0.0,
             "balance_due_usd": 0.0,
+            "charge_finalized": False,
             "paid": request.paid,
-            "payment_status": "not_required" if not request.charge_enabled else "payment_due",
+            "payment_status": "paid" if request.paid else "not_required",
         }
         self.active_job_logs = []
 
