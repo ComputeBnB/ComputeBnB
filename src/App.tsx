@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { AppStage, Worker, Job } from './types';
-import { mockWorkers, mockLogs, mockJobResult } from './mockData';
-import { WorkerListScreen } from './screens/WorkerListScreen';
-import { SubmitJobScreen } from './screens/SubmitJobScreen';
-import { JobExecutionScreen } from './screens/JobExecutionScreen';
-import { JobCompleteScreen } from './screens/JobCompleteScreen';
+import { useState, useEffect } from "react";
+import { AppStage, AppMode, Worker, Job } from "./types";
+import { mockWorkers, mockLogs, mockJobResult } from "./mockData";
+import { WorkerListScreen } from "./screens/WorkerListScreen";
+import { SubmitJobScreen } from "./screens/SubmitJobScreen";
+import { JobExecutionScreen } from "./screens/JobExecutionScreen";
+import { JobCompleteScreen } from "./screens/JobCompleteScreen";
+import { HostModeScreen } from "./screens/HostModeScreen";
 
 function App() {
-  const [stage, setStage] = useState<AppStage>('discover');
+  const [mode, setMode] = useState<AppMode>("guest");
+  const [stage, setStage] = useState<AppStage>("discover");
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
   const [currentJob, setCurrentJob] = useState<Job | null>(null);
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
@@ -15,7 +17,7 @@ function App() {
 
   // Simulate log streaming during execution
   useEffect(() => {
-    if (stage === 'execution' && executionLogs.length < mockLogs.length) {
+    if (stage === "execution" && executionLogs.length < mockLogs.length) {
       const timer = setTimeout(() => {
         setExecutionLogs((prev) => [...prev, mockLogs[prev.length]]);
       }, 1500); // Add a new log every 1.5 seconds
@@ -24,9 +26,9 @@ function App() {
     }
 
     // When all logs are complete, transition to complete screen
-    if (stage === 'execution' && executionLogs.length === mockLogs.length) {
+    if (stage === "execution" && executionLogs.length === mockLogs.length) {
       const completeTimer = setTimeout(() => {
-        setStage('complete');
+        setStage("complete");
       }, 2000);
 
       return () => clearTimeout(completeTimer);
@@ -35,7 +37,7 @@ function App() {
 
   // Simulate elapsed time counter during execution
   useEffect(() => {
-    if (stage === 'execution') {
+    if (stage === "execution") {
       const timer = setInterval(() => {
         setElapsedTime((prev) => prev + 1);
       }, 1000);
@@ -46,11 +48,11 @@ function App() {
 
   const handleSelectWorker = (worker: Worker) => {
     setSelectedWorker(worker);
-    setStage('submit');
+    setStage("submit");
   };
 
   const handleBackToWorkerList = () => {
-    setStage('discover');
+    setStage("discover");
     setSelectedWorker(null);
   };
 
@@ -71,7 +73,7 @@ function App() {
       configFile: jobData.configFile,
       arguments: jobData.arguments,
       notes: jobData.notes,
-      status: 'running',
+      status: "running",
       startTime: new Date(),
       logs: [],
     };
@@ -79,15 +81,27 @@ function App() {
     setCurrentJob(job);
     setExecutionLogs([]);
     setElapsedTime(0);
-    setStage('execution');
+    setStage("execution");
   };
 
   const handleReturnToWorkerList = () => {
-    setStage('discover');
+    setStage("discover");
     setSelectedWorker(null);
     setCurrentJob(null);
     setExecutionLogs([]);
     setElapsedTime(0);
+  };
+
+  const handleStartHosting = () => {
+    setMode("host");
+    setStage("discover");
+    setSelectedWorker(null);
+    setCurrentJob(null);
+  };
+
+  const handleStopHosting = () => {
+    setMode("guest");
+    setStage("discover");
   };
 
   return (
@@ -100,46 +114,60 @@ function App() {
           </div>
           <div>
             <h1 className="text-base font-bold text-app-text">ComputeBnB</h1>
-            <p className="text-xs text-app-text-tertiary">Local Compute Sharing</p>
+            <p className="text-xs text-app-text-tertiary">
+              Local Compute Sharing
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="px-2 py-1 rounded-md bg-app-surface border border-app-border">
-            <span className="text-xs text-app-text-secondary font-mono">v0.1.0</span>
+            <span className="text-xs text-app-text-secondary font-mono">
+              v0.1.0
+            </span>
           </div>
         </div>
       </div>
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden">
-        {stage === 'discover' && (
-          <WorkerListScreen workers={mockWorkers} onSelectWorker={handleSelectWorker} />
-        )}
+        {mode === "host" ? (
+          <HostModeScreen onStopHosting={handleStopHosting} />
+        ) : (
+          <>
+            {stage === "discover" && (
+              <WorkerListScreen
+                workers={mockWorkers}
+                onSelectWorker={handleSelectWorker}
+                onStartHosting={handleStartHosting}
+              />
+            )}
 
-        {stage === 'submit' && selectedWorker && (
-          <SubmitJobScreen
-            worker={selectedWorker}
-            onBack={handleBackToWorkerList}
-            onSubmit={handleSubmitJob}
-          />
-        )}
+            {stage === "submit" && selectedWorker && (
+              <SubmitJobScreen
+                worker={selectedWorker}
+                onBack={handleBackToWorkerList}
+                onSubmit={handleSubmitJob}
+              />
+            )}
 
-        {stage === 'execution' && selectedWorker && currentJob && (
-          <JobExecutionScreen
-            worker={selectedWorker}
-            jobName={currentJob.name}
-            logs={executionLogs}
-            elapsedTime={elapsedTime}
-          />
-        )}
+            {stage === "execution" && selectedWorker && currentJob && (
+              <JobExecutionScreen
+                worker={selectedWorker}
+                jobName={currentJob.name}
+                logs={executionLogs}
+                elapsedTime={elapsedTime}
+              />
+            )}
 
-        {stage === 'complete' && selectedWorker && currentJob && (
-          <JobCompleteScreen
-            worker={selectedWorker}
-            jobName={currentJob.name}
-            result={mockJobResult}
-            onReturn={handleReturnToWorkerList}
-          />
+            {stage === "complete" && selectedWorker && currentJob && (
+              <JobCompleteScreen
+                worker={selectedWorker}
+                jobName={currentJob.name}
+                result={mockJobResult}
+                onReturn={handleReturnToWorkerList}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

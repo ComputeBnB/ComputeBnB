@@ -1,30 +1,46 @@
-import React from 'react';
-import { Wifi, RefreshCw } from 'lucide-react';
-import { Worker } from '../types';
-import { WorkerCard } from '../components/WorkerCard';
+import React from "react";
+import { Wifi, RefreshCw, Server } from "lucide-react";
+import { Worker } from "../types";
+import { WorkerCard } from "../components/WorkerCard";
 
 interface WorkerListScreenProps {
   workers: Worker[];
   onSelectWorker: (worker: Worker) => void;
+  onStartHosting: () => void;
 }
 
-export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({ workers, onSelectWorker }) => {
-  const availableCount = workers.filter(w => w.status === 'available').length;
+export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
+  workers,
+  onSelectWorker,
+  onStartHosting,
+}) => {
+  const availableCount = workers.filter((w) => w.status === "available").length;
 
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-app-border">
         <div>
-          <h1 className="text-2xl font-bold text-app-text mb-1">Discover Workers</h1>
+          <h1 className="text-2xl font-bold text-app-text mb-1">
+            Discover Workers
+          </h1>
           <p className="text-sm text-app-text-secondary">
             Select a computer on your local network to run your job
           </p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-app-border bg-app-surface hover:bg-app-surface-elevated transition-all text-sm text-app-text-secondary hover:text-app-text">
-          <RefreshCw size={16} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onStartHosting}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-app-accent hover:bg-app-accent/90 transition-all text-sm text-white font-medium shadow-lg shadow-app-accent/20"
+          >
+            <Server size={16} />
+            <span>Host Computer</span>
+          </button>
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-app-border bg-app-surface hover:bg-app-surface-elevated transition-all text-sm text-app-text-secondary hover:text-app-text">
+            <RefreshCw size={16} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Stats Bar */}
@@ -49,7 +65,7 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({ workers, onS
               key={worker.id}
               worker={worker}
               onSelect={() => onSelectWorker(worker)}
-              disabled={worker.status !== 'available'}
+              disabled={worker.status !== "available"}
             />
           ))}
         </div>

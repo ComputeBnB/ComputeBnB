@@ -1,7 +1,7 @@
 export interface Worker {
   id: string;
   name: string;
-  status: 'available' | 'busy' | 'offline';
+  status: "available" | "busy" | "offline";
   trusted: boolean;
   specs: {
     cpu: string;
@@ -20,7 +20,7 @@ export interface Job {
   configFile?: string;
   arguments?: string;
   notes?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: "pending" | "running" | "completed" | "failed";
   startTime?: Date;
   endTime?: Date;
   logs: string[];
@@ -38,4 +38,6 @@ export interface JobResult {
   summary: string;
 }
 
-export type AppStage = 'discover' | 'submit' | 'execution' | 'complete';
+export type AppStage = "discover" | "submit" | "execution" | "complete";
+
+export type AppMode = "guest" | "host";
