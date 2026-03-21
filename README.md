@@ -119,11 +119,11 @@ Why TCP:
 To keep the MVP small and reliable, the system supports Python only.
 
 Recommended input:
-- a single Python file as text
+- a Python project folder upload with a `main.py` entrypoint
+- optional `requirements.txt` inside the project root or a subdirectory
 
 Optional later:
-- a zipped Python project with `main.py`
-- drag-and-drop folder upload with auto-zip in the UI
+- drag-and-drop project upload in the UI
 
 Entrypoint:
 - `python main.py`
@@ -136,9 +136,11 @@ Recommended container image:
 - `python:3.11-slim`
 
 Worker flow:
-- receive Python code over TCP
-- write job files into a temporary working directory
+- receive Python project files over the network
+- write project files into a temporary working directory
+- detect `requirements.txt` when present
 - start a Docker container with that directory mounted
+- install dependencies into a mounted workspace directory when `requirements.txt` exists
 - run `python main.py`
 - stream logs back to the client
 - stop and clean up the container when the job finishes or times out
@@ -263,12 +265,32 @@ Use newline-delimited JSON over TCP.
 #### Run Job
 
 ```json
-{ "type": "run", "job_id": "job-1", "filename": "main.py", "timeout_secs": 300, "code": "print('hi')" }
+{
+  "type": "run",
+  "job_id": "job-1",
+  "filename": "main.py",
+  "entrypoint": "main.py",
+  "timeout_secs": 300,
+  "code": "print('hi')",
+  "project_name": "demo-project",
+  "project_files": [
+    {
+      "path": "main.py",
+      "content_b64": "cHJpbnQoJ2hpJykK",
+      "size_bytes": 12
+    },
+    {
+      "path": "requirements.txt",
+      "content_b64": "cmVxdWVzdHM9PTIuMzIuMwo=",
+      "size_bytes": 17
+    }
+  ]
+}
 ```
 
 Initial MVP note:
-- support `code` first
-- treat zip project upload as a stretch goal
+- support project folder upload first
+- keep `main.py` as the default entrypoint assumption
 
 #### Cancel Job
 
@@ -320,10 +342,10 @@ Initial MVP note:
 2. Worker advertises itself via mDNS
 3. Client opens and discovers workers on the LAN
 4. User selects a worker
-5. User pastes Python code or uploads a single file
+5. User uploads a Python project folder or pastes a single script
 6. User sets a timeout
-7. Client sends the job over TCP
-8. Worker starts a Docker container and executes the job
+7. Client sends the project files and entrypoint metadata to the worker
+8. Worker starts a Docker container, installs `requirements.txt` when present, and executes the entrypoint
 9. Client receives live logs and status updates
 10. Job finishes or times out
 11. Worker returns to idle

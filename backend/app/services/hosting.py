@@ -10,11 +10,15 @@ import platform
 import asyncio
 import secrets
 import time
+import base64
+import shlex
+import tempfile
 from typing import Optional, Dict, AsyncGenerator
 from datetime import datetime, timedelta
+from pathlib import Path
 from zeroconf import Zeroconf, ServiceInfo
 from app.models.messages import (
-    JobRequest, SessionToken, RequestStatus, WorkerStatus,
+    JobRequest, SessionToken, RequestStatus, WorkerStatus, ProjectFile,
 )
 
 SERVICE_TYPE = "_compute-worker._tcp.local."
@@ -133,7 +137,10 @@ class HostingService:
 
     def create_request(
         self, guest_name: str, guest_ip: str, code: str,
-        filename: str = "main.py", timeout_secs: int = 300,
+        filename: str = "main.py", entrypoint: str = "main.py",
+        project_name: Optional[str] = None,
+        project_files: Optional[list[ProjectFile]] = None,
+        timeout_secs: int = 300,
     ) -> JobRequest:
         """Create a pending job request from a guest."""
         request_id = f"req-{uuid.uuid4().hex[:8]}"
@@ -143,6 +150,9 @@ class HostingService:
             guest_ip=guest_ip,
             code=code,
             filename=filename,
+            entrypoint=entrypoint,
+            project_name=project_name,
+            project_files=project_files or [],
             timeout_secs=timeout_secs,
             status=RequestStatus.PENDING,
             created_at=datetime.now(),
@@ -222,10 +232,177 @@ class HostingService:
 
     # ── Job execution ───────────────────────────────────────────────
 
+    def _record_active_log(self, message: dict) -> None:
+        self.active_job_logs.append(message)
+
+    def _build_status_message(
+        self,
+        request_id: str,
+        state: str,
+        detail: Optional[str] = None,
+        runtime: str = "docker",
+    ) -> dict:
+        if self.active_job:
+            self.active_job["state"] = state
+            self.active_job["runtime"] = runtime
+            self.active_job["status_detail"] = detail
+
+        if detail:
+            self._record_active_log({"type": "status", "data": f"[{state}] {detail}"})
+        else:
+            self._record_active_log({"type": "status", "data": f"[{state}]"})
+
+        message = {
+            "type": "status",
+            "state": state,
+            "job_id": request_id,
+            "runtime": runtime,
+        }
+        if detail:
+            message["detail"] = detail
+        return message
+
+    def _sanitize_relative_path(self, raw_path: str) -> str:
+        normalized = raw_path.replace("\\", "/").strip()
+        path = Path(normalized)
+        if not normalized or normalized == "." or path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"Invalid project path: {raw_path}")
+        return path.as_posix()
+
+    def _resolve_requirements_path(self, workspace_root: str) -> Optional[str]:
+        matches = [
+            path.relative_to(workspace_root).as_posix()
+            for path in Path(workspace_root).rglob("requirements.txt")
+            if path.is_file()
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: (item != "requirements.txt", item.count("/"), item))
+        return matches[0]
+
+    def _materialize_request_workspace(self, workspace_root: str, request: JobRequest) -> tuple[str, int, Optional[str]]:
+        workspace = Path(workspace_root)
+
+        if request.project_files:
+            for project_file in request.project_files:
+                relative_path = self._sanitize_relative_path(project_file.path)
+                target = workspace / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(base64.b64decode(project_file.content_b64))
+            file_count = len(request.project_files)
+        elif request.code:
+            relative_path = self._sanitize_relative_path(request.filename)
+            target = workspace / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(request.code, encoding="utf-8")
+            file_count = 1
+        else:
+            raise ValueError("No code or project files provided")
+
+        entrypoint = self._sanitize_relative_path(request.entrypoint or request.filename)
+        if not (workspace / entrypoint).is_file():
+            raise FileNotFoundError(f"Entrypoint not found in uploaded project: {entrypoint}")
+
+        requirements_path = self._resolve_requirements_path(workspace_root)
+        return entrypoint, file_count, requirements_path
+
+    async def _start_docker_process(
+        self,
+        workspace_root: str,
+        container_name: str,
+        shell_command: str,
+        env: Optional[dict[str, str]] = None,
+    ):
+        docker_command = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            container_name,
+            "-v",
+            f"{workspace_root}:/workspace",
+            "-w",
+            "/workspace",
+        ]
+
+        for key, value in (env or {}).items():
+            docker_command.extend(["-e", f"{key}={value}"])
+
+        docker_command.extend([
+            "python:3.11-slim",
+            "sh",
+            "-lc",
+            shell_command,
+        ])
+
+        return await asyncio.create_subprocess_exec(
+            *docker_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=workspace_root,
+        )
+
+    async def _cleanup_container(self, container_name: str) -> None:
+        cleanup = await asyncio.create_subprocess_exec(
+            "docker",
+            "rm",
+            "-f",
+            container_name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await cleanup.wait()
+
+    async def _pump_stream(self, stream, message_type: str, queue: asyncio.Queue) -> None:
+        if stream is None:
+            await queue.put({"type": "__stream_closed__", "stream": message_type})
+            return
+
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            await queue.put({"type": message_type, "data": line.decode(errors="replace")})
+        await queue.put({"type": "__stream_closed__", "stream": message_type})
+
+    async def _stream_process_output(
+        self,
+        process,
+        deadline: float,
+    ) -> AsyncGenerator[dict, None]:
+        queue: asyncio.Queue = asyncio.Queue()
+        stdout_task = asyncio.create_task(self._pump_stream(process.stdout, "stdout", queue))
+        stderr_task = asyncio.create_task(self._pump_stream(process.stderr, "stderr", queue))
+        open_streams = 2
+        waiter = asyncio.create_task(process.wait())
+
+        try:
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+
+                if waiter.done() and open_streams == 0 and queue.empty():
+                    break
+
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=min(0.25, remaining))
+                except asyncio.TimeoutError:
+                    continue
+
+                if item["type"] == "__stream_closed__":
+                    open_streams -= 1
+                    continue
+
+                self._record_active_log(item)
+                yield item
+
+            await waiter
+        finally:
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+
     async def execute_job(self, request_id: str) -> AsyncGenerator[dict, None]:
-        """Execute a job and yield streaming messages (stdout, stderr, done/error). Accepts either code as string or a file upload."""
-        import tempfile
-        import os
+        """Execute a job inside Docker and yield streaming status and logs."""
         request = self.pending_requests.get(request_id)
         if not request:
             yield {"type": "error", "message": "Request not found"}
@@ -241,99 +418,153 @@ class HostingService:
             "guest_ip": request.guest_ip,
             "code": request.code,
             "filename": request.filename,
+            "entrypoint": request.entrypoint,
+            "project_name": request.project_name,
+            "file_count": len(request.project_files) if request.project_files else 1,
+            "has_requirements_txt": False,
+            "runtime": "docker",
             "state": "starting",
+            "status_detail": "Accepted job, preparing Docker workspace",
             "started_at": datetime.now().isoformat(),
         }
         self.active_job_logs = []
 
-        yield {"type": "status", "state": "starting", "job_id": request_id}
+        yield self._build_status_message(
+            request_id,
+            "starting",
+            "Accepted job, preparing Docker workspace",
+        )
 
         temp_dir = tempfile.TemporaryDirectory()
-        code_path = os.path.join(temp_dir.name, request.filename)
-        output_path = os.path.join(temp_dir.name, "output.txt")
+        workspace_root = temp_dir.name
+        deadline = start_time + request.timeout_secs
+        stdout_output: list[str] = []
         try:
-            # If request.code is not empty, write it to a file
-            if getattr(request, "code", None):
-                with open(code_path, "w") as f:
-                    f.write(request.code)
-            # If request has file_content, write it to a file (for future extension)
-            elif getattr(request, "file_content", None):
-                with open(code_path, "wb") as f:
-                    f.write(request.file_content)
-            else:
-                yield {"type": "error", "message": "No code or file provided", "job_id": request_id}
-                return
-
-            # Run the code as a subprocess, redirect output to output.txt
-            process = await asyncio.create_subprocess_exec(
-                "python3", code_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=temp_dir.name,
+            entrypoint, file_count, requirements_path = self._materialize_request_workspace(
+                workspace_root,
+                request,
             )
 
             if self.active_job:
-                self.active_job["state"] = "running"
-            yield {"type": "status", "state": "running", "job_id": request_id}
+                self.active_job["filename"] = entrypoint
+                self.active_job["entrypoint"] = entrypoint
+                self.active_job["file_count"] = file_count
+                self.active_job["has_requirements_txt"] = requirements_path is not None
+                self.active_job["requirements_path"] = requirements_path
 
-            stdout_lines = []
-            stderr_lines = []
+            project_label = request.project_name or request.filename
+            prep_detail = f"Prepared {file_count} file(s) from {project_label}"
+            yield self._build_status_message(request_id, "preparing_project", prep_detail)
 
-            async def collect_stdout():
-                while True:
-                    line = await process.stdout.readline()
-                    if not line:
-                        break
-                    msg = {"type": "stdout", "data": line.decode()}
-                    stdout_lines.append(msg)
-                    self.active_job_logs.append(msg)
+            if requirements_path:
+                deps_container = f"computebnb-{request_id}-deps"
+                install_detail = f"Installing dependencies from {requirements_path} inside Docker"
+                yield self._build_status_message(
+                    request_id,
+                    "installing_dependencies",
+                    install_detail,
+                )
 
-            async def collect_stderr():
-                while True:
-                    line = await process.stderr.readline()
-                    if not line:
-                        break
-                    msg = {"type": "stderr", "data": line.decode()}
-                    stderr_lines.append(msg)
-                    self.active_job_logs.append(msg)
+                install_command = (
+                    "python -m pip install --no-cache-dir --target /workspace/.computebnb_deps "
+                    f"-r {shlex.quote(requirements_path)}"
+                )
+                install_process = await self._start_docker_process(
+                    workspace_root,
+                    deps_container,
+                    install_command,
+                )
+
+                try:
+                    async for message in self._stream_process_output(install_process, deadline):
+                        if message["type"] == "stdout":
+                            stdout_output.append(message["data"])
+                        yield message
+                except asyncio.TimeoutError:
+                    install_process.kill()
+                    await self._cleanup_container(deps_container)
+                    yield self._build_status_message(
+                        request_id,
+                        "timeout",
+                        "Dependency installation exceeded the configured timeout",
+                    )
+                    yield {"type": "error", "message": "Job timed out while installing dependencies", "job_id": request_id}
+                    return
+
+                await install_process.wait()
+                await self._cleanup_container(deps_container)
+
+                if install_process.returncode != 0:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    yield self._build_status_message(
+                        request_id,
+                        "failed",
+                        "Dependency installation failed inside Docker",
+                    )
+                    yield {
+                        "type": "done",
+                        "job_id": request_id,
+                        "exit_code": install_process.returncode,
+                        "duration_ms": duration_ms,
+                    }
+                    return
+
+            run_container = f"computebnb-{request_id}-run"
+            run_detail = f"Running {entrypoint} inside Docker"
+            yield self._build_status_message(request_id, "running", run_detail)
+
+            runtime_env = {"PYTHONPATH": "/workspace/.computebnb_deps"} if requirements_path else None
+            run_process = await self._start_docker_process(
+                workspace_root,
+                run_container,
+                f"python {shlex.quote(entrypoint)}",
+                env=runtime_env,
+            )
 
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(collect_stdout(), collect_stderr()),
-                    timeout=request.timeout_secs,
-                )
+                async for message in self._stream_process_output(run_process, deadline):
+                    if message["type"] == "stdout":
+                        stdout_output.append(message["data"])
+                    yield message
             except asyncio.TimeoutError:
-                process.kill()
+                run_process.kill()
+                await self._cleanup_container(run_container)
+                yield self._build_status_message(
+                    request_id,
+                    "timeout",
+                    "Execution exceeded the configured timeout",
+                )
                 yield {"type": "error", "message": "Job timed out", "job_id": request_id}
                 return
 
-            await process.wait()
+            await run_process.wait()
+            await self._cleanup_container(run_container)
 
-            # Write stdout to output.txt
-            with open(output_path, "w") as out_f:
-                for msg in stdout_lines:
-                    out_f.write(msg["data"])
-
-            # Yield collected output
-            for msg in stdout_lines:
-                yield msg
-            for msg in stderr_lines:
-                yield msg
-
-            # Send the output file content back to the client
-            with open(output_path, "r") as out_f:
-                output_content = out_f.read()
-            yield {"type": "output_file", "filename": "output.txt", "content": output_content}
+            output_path = Path(workspace_root) / "output.txt"
+            output_path.write_text("".join(stdout_output), encoding="utf-8")
+            yield {
+                "type": "output_file",
+                "filename": "output.txt",
+                "content": output_path.read_text(encoding="utf-8"),
+            }
 
             duration_ms = int((time.time() - start_time) * 1000)
+            final_state = "done" if run_process.returncode == 0 else "failed"
+            final_detail = (
+                "Docker execution completed successfully"
+                if run_process.returncode == 0
+                else f"Docker execution exited with code {run_process.returncode}"
+            )
+            yield self._build_status_message(request_id, final_state, final_detail)
             yield {
                 "type": "done",
                 "job_id": request_id,
-                "exit_code": process.returncode,
+                "exit_code": run_process.returncode,
                 "duration_ms": duration_ms,
             }
 
         except Exception as e:
+            yield self._build_status_message(request_id, "failed", str(e))
             yield {"type": "error", "message": str(e), "job_id": request_id}
         finally:
             await self._update_advertised_status(WorkerStatus.IDLE)

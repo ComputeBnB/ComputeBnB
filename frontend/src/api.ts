@@ -1,4 +1,10 @@
-import { Worker, WorkerSpecs, HostingRequest, ActiveJob } from "./types";
+import {
+  Worker,
+  WorkerSpecs,
+  HostingRequest,
+  ActiveJob,
+  ProjectFileUpload,
+} from "./types";
 
 const LOCAL_API = "http://localhost:8000";
 
@@ -141,17 +147,27 @@ export async function denyRequest(
 
 export async function submitJob(
   worker: { host: string; port: number },
-  code: string,
-  guestName: string,
-  timeoutSecs: number = 300,
+  job: {
+    code: string;
+    filename: string;
+    entrypoint: string;
+    projectName?: string;
+    projectFiles?: ProjectFileUpload[];
+    guestName: string;
+    timeoutSecs?: number;
+  },
 ): Promise<{ request_id: string; status: string }> {
   const res = await fetch(`${workerApi(worker)}/jobs/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      code,
-      guest_name: guestName,
-      timeout_secs: timeoutSecs,
+      code: job.code,
+      filename: job.filename,
+      entrypoint: job.entrypoint,
+      project_name: job.projectName,
+      project_files: job.projectFiles ?? [],
+      guest_name: job.guestName,
+      timeout_secs: job.timeoutSecs ?? 300,
     }),
   });
   if (!res.ok) throw new Error("Failed to submit job");

@@ -4,7 +4,9 @@ All endpoints require hosting mode to be active.
 """
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
+from app.models.messages import ProjectFile
 from app.services.hosting import hosting_service
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -13,6 +15,9 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 class JobRequestBody(BaseModel):
     code: str
     filename: str = "main.py"
+    entrypoint: Optional[str] = None
+    project_name: Optional[str] = None
+    project_files: list[ProjectFile] = Field(default_factory=list)
     timeout_secs: int = 300
     guest_name: str = "anonymous"
 
@@ -33,6 +38,9 @@ async def request_job(body: JobRequestBody, request: Request):
         guest_ip=guest_ip,
         code=body.code,
         filename=body.filename,
+        entrypoint=body.entrypoint or body.filename,
+        project_name=body.project_name,
+        project_files=body.project_files,
         timeout_secs=body.timeout_secs,
     )
 

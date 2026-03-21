@@ -42,6 +42,8 @@ function App() {
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [jobStatus, setJobStatus] = useState<JobStatus>("pending");
+  const [jobPhase, setJobPhase] = useState<string>("pending_approval");
+  const [jobPhaseDetail, setJobPhaseDetail] = useState<string | null>(null);
   const [jobResult, setJobResult] = useState<JobResult | null>(null);
 
   // Local machine info
@@ -119,26 +121,45 @@ function App() {
   const handleSubmitJob = async (jobData: {
     name: string;
     code: string;
+    filename: string;
+    entrypoint: string;
+    projectName?: string;
+    projectFiles?: {
+      path: string;
+      content_b64: string;
+      size_bytes: number;
+    }[];
+    hasRequirementsTxt?: boolean;
     timeoutSecs: number;
   }) => {
     if (!selectedWorker) return;
 
     try {
-      const result = await submitJob(
-        selectedWorker,
-        jobData.code,
-        jobData.name || "anonymous",
-        jobData.timeoutSecs,
-      );
+      const result = await submitJob(selectedWorker, {
+        code: jobData.code,
+        filename: jobData.filename,
+        entrypoint: jobData.entrypoint,
+        projectName: jobData.projectName,
+        projectFiles: jobData.projectFiles,
+        guestName: jobData.name || "anonymous",
+        timeoutSecs: jobData.timeoutSecs,
+      });
 
       const job: Job = {
         id: `job-${Date.now()}`,
         name: jobData.name || "Untitled Job",
         worker: selectedWorker,
         code: jobData.code,
+        filename: jobData.filename,
+        entrypoint: jobData.entrypoint,
+        projectName: jobData.projectName,
+        projectFileCount: jobData.projectFiles?.length,
+        hasRequirementsTxt: jobData.hasRequirementsTxt,
+        projectFiles: jobData.projectFiles,
         requestId: result.request_id,
         timeoutSecs: jobData.timeoutSecs,
         status: "pending",
+        phase: "pending_approval",
         startTime: new Date(),
         logs: [],
       };
@@ -147,6 +168,8 @@ function App() {
       setExecutionLogs([]);
       setElapsedTime(0);
       setJobStatus("pending");
+      setJobPhase("pending_approval");
+      setJobPhaseDetail("Waiting for the host to approve your project upload.");
       setJobResult(null);
       setStage("execution");
 
@@ -169,11 +192,15 @@ function App() {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setJobStatus("approved");
+          setJobPhase("approved");
+          setJobPhaseDetail("Host approved the job. Connecting to the Docker runtime.");
           connectWebSocket(worker, requestId, status.token);
         } else if (status.status === "denied") {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setJobStatus("denied");
+          setJobPhase("denied");
+          setJobPhaseDetail("The host denied this job request.");
         }
       } catch (err) {
         console.error("Poll error:", err);
@@ -202,8 +229,19 @@ function App() {
         case "status":
           if (msg.state === "running") {
             setJobStatus("running");
+          } else if (msg.state === "timeout") {
+            setJobStatus("timeout");
+          } else if (msg.state === "failed") {
+            setJobStatus("error");
+          } else if (msg.state !== "done") {
+            setJobStatus("approved");
           }
-          setExecutionLogs((prev) => [...prev, `[status] ${msg.state}`]);
+          setJobPhase(msg.state);
+          setJobPhaseDetail(msg.detail ?? null);
+          setExecutionLogs((prev) => [
+            ...prev,
+            msg.detail ? `[status] ${msg.state}: ${msg.detail}` : `[status] ${msg.state}`,
+          ]);
           break;
 
         case "stdout":
@@ -219,6 +257,12 @@ function App() {
         case "done":
           if (timerRef.current) clearInterval(timerRef.current);
           setJobStatus("done");
+          setJobPhase(msg.exit_code === 0 ? "done" : "failed");
+          setJobPhaseDetail(
+            msg.exit_code === 0
+              ? "Docker execution finished successfully."
+              : `Docker execution finished with exit code ${msg.exit_code}.`,
+          );
           setJobResult({
             exitCode: msg.exit_code,
             runtime: msg.duration_ms / 1000,
@@ -230,7 +274,9 @@ function App() {
 
         case "error":
           if (timerRef.current) clearInterval(timerRef.current);
-          setJobStatus("error");
+          setJobStatus(msg.message?.toLowerCase().includes("timed out") ? "timeout" : "error");
+          setJobPhase(msg.message?.toLowerCase().includes("timed out") ? "timeout" : "error");
+          setJobPhaseDetail(msg.message);
           setExecutionLogs((prev) => [...prev, `[error] ${msg.message}`]);
           setJobResult({
             exitCode: 1,
@@ -249,6 +295,8 @@ function App() {
         ...prev,
         "[error] WebSocket connection failed",
       ]);
+      setJobPhase("error");
+      setJobPhaseDetail("The connection to the host closed unexpectedly.");
     };
 
     ws.onclose = () => {
@@ -277,6 +325,8 @@ function App() {
     setExecutionLogs([]);
     setElapsedTime(0);
     setJobStatus("pending");
+    setJobPhase("pending_approval");
+    setJobPhaseDetail(null);
     setJobResult(null);
   };
 
@@ -423,6 +473,8 @@ function App() {
                 logs={executionLogs}
                 elapsedTime={elapsedTime}
                 jobStatus={jobStatus}
+                phase={jobPhase}
+                phaseDetail={jobPhaseDetail}
                 onReturn={handleReturnToWorkerList}
               />
             )}

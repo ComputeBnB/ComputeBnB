@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from enum import Enum
 from datetime import datetime
@@ -7,6 +7,8 @@ from datetime import datetime
 class JobState(str, Enum):
     PENDING = "pending"
     STARTING = "starting"
+    PREPARING_PROJECT = "preparing_project"
+    INSTALLING_DEPENDENCIES = "installing_dependencies"
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
@@ -27,6 +29,12 @@ class RequestStatus(str, Enum):
     EXPIRED = "expired"
 
 
+class ProjectFile(BaseModel):
+    path: str
+    content_b64: str
+    size_bytes: int = 0
+
+
 # Job request from guest to host (handshake)
 class JobRequest(BaseModel):
     request_id: str
@@ -34,6 +42,9 @@ class JobRequest(BaseModel):
     guest_ip: str
     code: str
     filename: str = "main.py"
+    entrypoint: str = "main.py"
+    project_name: Optional[str] = None
+    project_files: list[ProjectFile] = Field(default_factory=list)
     timeout_secs: int = 300
     status: RequestStatus = RequestStatus.PENDING
     created_at: datetime = datetime.now()
@@ -57,6 +68,8 @@ class CancelJobRequest(BaseModel):
 class StatusMessage(BaseModel):
     type: str = "status"
     state: JobState
+    detail: Optional[str] = None
+    runtime: Optional[str] = None
 
 
 class StdoutMessage(BaseModel):

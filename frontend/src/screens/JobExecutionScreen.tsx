@@ -10,6 +10,8 @@ interface JobExecutionScreenProps {
   logs: string[];
   elapsedTime: number;
   jobStatus: JobStatus;
+  phase: string;
+  phaseDetail: string | null;
   onReturn: () => void;
 }
 
@@ -19,6 +21,8 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
   logs,
   elapsedTime,
   jobStatus,
+  phase,
+  phaseDetail,
   onReturn,
 }) => {
   const formatTime = (seconds: number) => {
@@ -57,6 +61,21 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
     );
   }
 
+  const formatPhaseLabel = (value: string) =>
+    value
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+
+  const badgeStatus =
+    jobStatus === 'done'
+      ? 'completed'
+      : jobStatus === 'error' || jobStatus === 'timeout'
+        ? 'failed'
+        : jobStatus === 'approved'
+          ? 'pending'
+          : 'running';
+
   // Host denied the request
   if (jobStatus === 'denied') {
     return (
@@ -93,13 +112,13 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
         <div className="flex items-start justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-app-text mb-1">{jobName}</h1>
-            <p className="text-sm text-app-text-secondary">Executing on {worker.name}</p>
+            <p className="text-sm text-app-text-secondary">Running inside Docker on {worker.name}</p>
           </div>
-          <StatusBadge status="running" size="lg" />
+          <StatusBadge status={badgeStatus} size="lg" />
         </div>
 
         {/* Job Info Cards */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="p-4 rounded-lg bg-app-surface border border-app-border">
             <div className="flex items-center gap-2 mb-2">
               <Server size={16} className="text-app-text-tertiary" />
@@ -123,6 +142,21 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
             <div className="text-2xl font-bold text-app-text font-mono">
               {formatTime(elapsedTime)}
             </div>
+          </div>
+
+          <div className="p-4 rounded-lg bg-app-surface border border-app-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Loader2 size={16} className="text-app-text-tertiary" />
+              <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
+                Phase
+              </span>
+            </div>
+            <div className="text-base font-semibold text-app-text">
+              {formatPhaseLabel(phase)}
+            </div>
+            {phaseDetail && (
+              <div className="text-xs text-app-text-tertiary mt-1">{phaseDetail}</div>
+            )}
           </div>
         </div>
       </div>

@@ -41,6 +41,13 @@ async def get_pending_requests():
             "guest_name": r.guest_name,
             "guest_ip": r.guest_ip,
             "filename": r.filename,
+            "entrypoint": r.entrypoint,
+            "project_name": r.project_name,
+            "file_count": len(r.project_files) if r.project_files else 1,
+            "has_requirements_txt": any(
+                file.path.replace("\\", "/").endswith("requirements.txt")
+                for file in r.project_files
+            ),
             "timeout_secs": r.timeout_secs,
             "code_preview": r.code[:200] + ("..." if len(r.code) > 200 else ""),
             "created_at": r.created_at.isoformat(),

@@ -74,7 +74,7 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                 </h2>
                 <p className="text-sm text-app-text-secondary">
                   {isJobRunning
-                    ? `Executing code from ${activeJob?.guest_name}`
+                    ? `Executing Docker job from ${activeJob?.guest_name}`
                     : 'Discoverable on the local network'}
                 </p>
               </div>
@@ -132,6 +132,11 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                   <span>{activeJob.guest_name}</span>
                 </div>
                 <span className="text-app-text-tertiary">{activeJob.guest_ip}</span>
+                {activeJob.runtime && (
+                  <span className="px-2 py-0.5 rounded-full bg-app-accent/10 text-app-accent border border-app-accent/20 uppercase tracking-wide">
+                    {activeJob.runtime}
+                  </span>
+                )}
                 {activeJob.started_at && (
                   <div className="flex items-center gap-1">
                     <Clock size={12} />
@@ -140,14 +145,30 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                 )}
               </div>
 
+              {activeJob.status_detail && (
+                <div className="mb-4 p-3 bg-app-bg rounded-md border border-app-border/50 text-xs text-app-text-secondary">
+                  {activeJob.status_detail}
+                </div>
+              )}
+
               {/* Code being executed */}
               {activeJob.code && (
                 <div className="mb-4 p-3 bg-app-bg rounded-md border border-app-border/50">
                   <div className="flex items-center gap-2 mb-2">
                     <Code size={12} className="text-app-text-tertiary" />
                     <span className="text-xs text-app-text-tertiary font-medium">
-                      {activeJob.filename || 'main.py'}
+                      {activeJob.entrypoint || activeJob.filename || 'main.py'}
                     </span>
+                    {activeJob.project_name && (
+                      <span className="text-xs text-app-text-tertiary">
+                        · {activeJob.project_name}
+                      </span>
+                    )}
+                    {activeJob.has_requirements_txt && (
+                      <span className="text-xs text-emerald-400">
+                        · requirements.txt detected
+                      </span>
+                    )}
                   </div>
                   <pre className="text-xs text-app-text-secondary font-mono whitespace-pre-wrap break-all leading-relaxed max-h-32 overflow-y-auto">
                     {activeJob.code}
@@ -179,7 +200,7 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                             : 'text-app-text-secondary'
                         }
                       >
-                        {log.data}
+                        {log.type === 'status' ? <span className="text-yellow-300">{log.data}</span> : log.data}
                       </div>
                     ))}
                     <div ref={logEndRef} />
@@ -242,8 +263,18 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                       <div className="flex items-center gap-2 mb-2">
                         <Code size={12} className="text-app-text-tertiary" />
                         <span className="text-xs text-app-text-tertiary font-medium">
-                          {req.filename}
+                          {req.project_name || req.entrypoint || req.filename}
                         </span>
+                        {req.file_count && req.file_count > 1 && (
+                          <span className="text-xs text-app-text-tertiary">
+                            · {req.file_count} files
+                          </span>
+                        )}
+                        {req.has_requirements_txt && (
+                          <span className="text-xs text-emerald-400">
+                            · requirements.txt included
+                          </span>
+                        )}
                         <span className="text-xs text-app-text-tertiary">
                           · timeout {req.timeout_secs}s
                         </span>
