@@ -10,6 +10,7 @@ import {
   Globe,
   FolderOpen,
 } from "lucide-react";
+import { buildSampleProject } from "../sampleProject";
 import { ProjectFileUpload, ProjectUpload, Worker } from "../types";
 
 type TauriDialogModule = typeof import("@tauri-apps/api/dialog");
@@ -319,6 +320,18 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
     }
   };
 
+  const handleLoadSampleProject = () => {
+    const sample = buildSampleProject();
+    setProjectUpload(sample.project);
+    setLoadedFileName(sample.project.entrypoint);
+    setCode(sample.entrypointCode);
+    setProjectError(null);
+
+    if (!jobName) {
+      setJobName(sample.project.name);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col animate-fade-in">
       <div className="flex items-center gap-4 px-8 py-6 border-b border-app-border">
@@ -478,6 +491,14 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
                 >
                   <FolderOpen size={14} />
                   <span>Load project folder</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLoadSampleProject}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-app-text-secondary hover:text-app-text border border-app-border hover:bg-app-surface-elevated transition-all"
+                >
+                  <Layers size={14} />
+                  <span>Load sample project</span>
                 </button>
                 {loadedFileName && (
                   <span className="text-xs text-app-text-tertiary">
