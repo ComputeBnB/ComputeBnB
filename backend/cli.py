@@ -10,24 +10,14 @@ import sys
 import asyncio
 import platform
 import os
-import importlib.util
 
-BACKEND_PATH = os.path.join(os.path.dirname(__file__), "app")
+BACKEND_ROOT = os.path.dirname(__file__)
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
 
-# Import backend modules dynamically
-def import_backend_module(module_path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load module {module_name} from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-# Import hosting and discovery services
-HOSTING_PATH = os.path.join(BACKEND_PATH, "services", "hosting.py")
-DISCOVERY_PATH = os.path.join(BACKEND_PATH, "services", "discovery.py")
-hosting_mod = import_backend_module(HOSTING_PATH, "hosting")
-discovery_mod = import_backend_module(DISCOVERY_PATH, "discovery")
+from app.main import app
+from app.services.discovery import discovery_service
+from app.services.hosting import FASTAPI_PORT, hosting_service
 
 
 def _host_snapshot(hosts):
@@ -43,34 +33,51 @@ def _print_hosts(hosts):
         print(f"  [{idx}] {host.display_name} ({host.host}:{host.port}) - {host.status.value}")
 
 async def run_host():
+    uvicorn = __import__("uvicorn")
+
+    print(f"[Host] Starting API server on port {FASTAPI_PORT}...")
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="0.0.0.0", port=FASTAPI_PORT, log_level="warning")
+    )
+    server_task = asyncio.create_task(server.serve())
+
+    while not server.started:
+        if server_task.done():
+            server_task.result()
+        await asyncio.sleep(0.1)
+
     print("[Host] Starting hosting service...")
-    result = await hosting_mod.hosting_service.start_hosting()
+    result = await hosting_service.start_hosting()
     print(f"[Host] Advertised as: {result}")
     print("[Host] Waiting for job requests. Press Ctrl+C to stop.")
     try:
         while True:
             await asyncio.sleep(5)
-            pending = hosting_mod.hosting_service.get_all_pending()
+            pending = hosting_service.get_all_pending()
             if pending:
                 print(f"[Host] Pending requests: {[r.request_id for r in pending]}")
                 for req in pending:
                     print(f"Approving request {req.request_id} from {req.guest_name} ({req.guest_ip})...")
-                    hosting_mod.hosting_service.approve_request(req.request_id)
+                    hosting_service.approve_request(req.request_id)
     except KeyboardInterrupt:
+        pass
+    finally:
         print("[Host] Stopping hosting service...")
-        await hosting_mod.hosting_service.stop_hosting()
+        await hosting_service.stop_hosting()
+        server.should_exit = True
+        await server_task
         print("[Host] Stopped.")
 
 async def run_guest():
     print("[Guest] Discovering hosts...")
-    discovery_mod.discovery_service.start()
+    discovery_service.start()
     try:
         hosts = []
         last_snapshot = None
         stable_polls = 0
 
         while True:
-            hosts = list(discovery_mod.discovery_service.get_workers().values())
+            hosts = list(discovery_service.get_workers().values())
             snapshot = _host_snapshot(hosts)
 
             if snapshot != last_snapshot:
@@ -88,7 +95,7 @@ async def run_guest():
 
             await asyncio.sleep(1)
     finally:
-        discovery_mod.discovery_service.stop()
+        discovery_service.stop()
 
     if not hosts:
         print("[Guest] No hosts found.")
@@ -122,7 +129,14 @@ async def run_guest():
     }
     url = f"http://{host.host}:{host.port}/jobs/request"
     print(f"[Guest] Sending job to {url}...")
-    resp = requests.post(url, json=req)
+    try:
+        resp = requests.post(url, json=req, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"[Guest] Failed to reach host API at {url}: {exc}")
+        print("[Guest] Make sure the host is running in host mode and the FastAPI server is listening on the advertised port.")
+        return
+
     print(f"[Guest] Response: {resp.json()}")
 
 if __name__ == "__main__":
