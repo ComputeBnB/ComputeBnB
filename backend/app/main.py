@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import workers, jobs, hosting
+from app.routers import workers, jobs, hosting, specs
 from app.services.discovery import discovery_service
 from app.services.hosting import hosting_service
 
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(workers.router)
 app.include_router(jobs.router)
 app.include_router(hosting.router)
+app.include_router(specs.router)
 
 
 @app.get("/health")

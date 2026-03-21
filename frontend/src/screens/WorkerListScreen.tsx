@@ -1,18 +1,22 @@
 import React from "react";
-import { Wifi, RefreshCw, Server } from "lucide-react";
+import { Wifi, RefreshCw, Server, Loader2 } from "lucide-react";
 import { Worker } from "../types";
 import { WorkerCard } from "../components/WorkerCard";
 
 interface WorkerListScreenProps {
   workers: Worker[];
+  loading: boolean;
   onSelectWorker: (worker: Worker) => void;
   onStartHosting: () => void;
+  onRefresh: () => void;
 }
 
 export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
   workers,
+  loading,
   onSelectWorker,
   onStartHosting,
+  onRefresh,
 }) => {
   const availableCount = workers.filter((w) => w.status === "available").length;
 
@@ -36,8 +40,16 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
             <Server size={16} />
             <span>Host Computer</span>
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-app-border bg-app-surface hover:bg-app-surface-elevated transition-all text-sm text-app-text-secondary hover:text-app-text">
-            <RefreshCw size={16} />
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-app-border bg-app-surface hover:bg-app-surface-elevated transition-all text-sm text-app-text-secondary hover:text-app-text disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <RefreshCw size={16} />
+            )}
             <span>Refresh</span>
           </button>
         </div>
@@ -59,16 +71,35 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
 
       {/* Worker Grid */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 max-w-7xl">
-          {workers.map((worker) => (
-            <WorkerCard
-              key={worker.id}
-              worker={worker}
-              onSelect={() => onSelectWorker(worker)}
-              disabled={worker.status !== "available"}
-            />
-          ))}
-        </div>
+        {loading && workers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <Loader2 size={32} className="text-app-accent animate-spin" />
+            <p className="text-sm text-app-text-secondary">
+              Scanning local network...
+            </p>
+          </div>
+        ) : workers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <Wifi size={48} className="text-app-text-tertiary" />
+            <div className="text-center">
+              <p className="text-app-text-secondary mb-1">No workers found</p>
+              <p className="text-sm text-app-text-tertiary">
+                Make sure other computers are running ComputeBnB in host mode
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 max-w-7xl">
+            {workers.map((worker) => (
+              <WorkerCard
+                key={worker.id}
+                worker={worker}
+                onSelect={() => onSelectWorker(worker)}
+                disabled={worker.status !== "available"}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
