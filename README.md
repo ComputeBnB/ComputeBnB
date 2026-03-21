@@ -26,6 +26,7 @@ Build a cross-platform LAN demo where:
 - real-time stdout/stderr streaming
 - timeout enforcement
 - final job status reporting
+- Docker-based Python execution
 - cross-platform worker support for macOS, Windows, and Linux
 
 ### Excluded
@@ -70,7 +71,7 @@ Responsibilities:
 
 Runs user jobs on the worker.
 
-Preferred:
+Primary:
 - Docker with a fixed Python image
 
 Fallback:
@@ -125,6 +126,27 @@ Optional later:
 Entrypoint:
 - `python main.py`
 
+### Docker Runtime
+
+Docker is part of the main MVP plan.
+
+Recommended container image:
+- `python:3.11-slim`
+
+Worker flow:
+- receive Python code over TCP
+- write job files into a temporary working directory
+- start a Docker container with that directory mounted
+- run `python main.py`
+- stream logs back to the client
+- stop and clean up the container when the job finishes or times out
+
+Recommended limits:
+- one container per worker at a time
+- CPU and memory caps if easy to add
+- timeout enforced by the worker even if the container hangs
+- disable networking later if time permits
+
 ### Timeout
 
 Each job includes a user-selected timeout.
@@ -151,7 +173,7 @@ Final states:
 
 ### Recommendation
 
-Use Docker if it is easy to integrate quickly. Do not use VMs for this hackathon.
+Use Docker as the default execution path. Do not use VMs for this hackathon.
 
 #### Docker
 
@@ -178,7 +200,7 @@ Cons:
 
 #### Subprocess Fallback
 
-If Docker slows the team down, use local subprocess execution.
+If Docker fails on a demo machine or takes too long on one platform, use local subprocess execution as an emergency fallback.
 
 This should be treated as trusted-demo mode only.
 
@@ -267,7 +289,7 @@ Use newline-delimited JSON over TCP.
 5. User pastes or uploads Python code
 6. User sets a timeout
 7. Client sends the job over TCP
-8. Worker executes the job
+8. Worker starts a Docker container and executes the job
 9. Client receives live logs and status updates
 10. Job finishes or times out
 11. Worker returns to idle
@@ -320,7 +342,7 @@ Use newline-delimited JSON over TCP.
 
 ### Hour 4
 
-- execute a simple Python script
+- execute a simple Python script in Docker
 - return success or failure
 
 ### Hour 5
@@ -335,7 +357,7 @@ Use newline-delimited JSON over TCP.
 
 ### Hour 7
 
-- finalize Docker path or subprocess fallback
+- finalize Docker path and keep subprocess fallback ready
 - test on multiple machines
 
 ### Hour 8
@@ -351,7 +373,7 @@ The MVP is done when:
 - at least two workers appear automatically on the LAN
 - the client can select a worker
 - the user can submit a Python script
-- the worker runs the script
+- the worker runs the script in Docker
 - logs stream in real time
 - timeout works correctly
 - final state is shown cleanly
@@ -361,12 +383,14 @@ The MVP is done when:
 
 - mDNS may behave differently across networks
 - Docker setup may take too long
+- Docker may not be installed or running on every machine
 - live log streaming may be buggy
 - Python runtime differences may affect subprocess fallback
 
 ## Mitigation
 
 - keep manual IP connect as a backup
+- verify Docker early on all worker machines
 - keep subprocess execution as a fallback if Docker slips
 - support only one job at a time per worker
 - support only single-file Python scripts
