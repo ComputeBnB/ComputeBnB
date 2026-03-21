@@ -6,6 +6,18 @@ function workerApi(worker: { host: string; port: number }): string {
   return `http://${worker.host}:${worker.port}`;
 }
 
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 5000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
+    clearTimeout(id),
+  );
+}
+
 // ── Discovery ───────────────────────────────────────────────────────
 
 interface BackendWorker {
@@ -18,7 +30,7 @@ interface BackendWorker {
 }
 
 export async function fetchWorkers(): Promise<Worker[]> {
-  const res = await fetch(`${LOCAL_API}/workers`);
+  const res = await fetchWithTimeout(`${LOCAL_API}/workers`);
   if (!res.ok) throw new Error("Failed to fetch workers");
   const data: BackendWorker[] = await res.json();
   return data.map((w) => ({
@@ -35,7 +47,7 @@ export async function fetchWorkerSpecs(
   host: string,
   port: number,
 ): Promise<WorkerSpecs> {
-  const res = await fetch(`http://${host}:${port}/specs`);
+  const res = await fetchWithTimeout(`http://${host}:${port}/specs`, {}, 3000);
   if (!res.ok) throw new Error("Failed to fetch specs");
   const data = await res.json();
   return {
@@ -49,7 +61,7 @@ export async function fetchWorkerSpecs(
 export async function fetchLocalSpecs(): Promise<
   WorkerSpecs & { platform?: string }
 > {
-  const res = await fetch(`${LOCAL_API}/specs`);
+  const res = await fetchWithTimeout(`${LOCAL_API}/specs`);
   if (!res.ok) throw new Error("Failed to fetch local specs");
   const data = await res.json();
   return {
