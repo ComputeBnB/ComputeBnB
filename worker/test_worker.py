@@ -1,81 +1,46 @@
 """
-Minimal test worker - just advertises via mDNS and accepts TCP connections.
-Run this to test if the backend can discover and connect to a worker.
+Standalone host launcher for local smoke testing.
+
+Run this on one machine to advertise a host and accept ComputeBnB TCP jobs without
+opening the React UI.
 """
 
-import socket
-import uuid
-import platform
-from zeroconf import Zeroconf, ServiceInfo
+from __future__ import annotations
 
-SERVICE_TYPE = "_compute-worker._tcp.local."
-PORT = 9000
+import asyncio
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.services.discovery import discovery_service
+from app.services.host_service import host_service
 
 
-def main():
-    worker_id = f"worker-{uuid.uuid4().hex[:8]}"
-    hostname = socket.gethostname()
-
-    # Get local IP
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+async def main() -> None:
+    discovery_service.start()
     try:
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-    finally:
-        s.close()
+        state = await host_service.start()
+        host = state.host
+        if not host:
+            raise RuntimeError("Host failed to start")
 
-    print(f"Worker ID: {worker_id}")
-    print(f"Local IP: {local_ip}")
-    print(f"Port: {PORT}")
+        print(f"Hosting as {host.display_name}")
+        print(f"mDNS service: {host.host_id}")
+        print(f"TCP target: {host.host}:{host.port}")
+        print("Waiting for guest connections. Press Ctrl+C to stop.")
 
-    # Advertise via mDNS
-    zeroconf = Zeroconf()
-    service_info = ServiceInfo(
-        SERVICE_TYPE,
-        f"{worker_id}.{SERVICE_TYPE}",
-        addresses=[socket.inet_aton(local_ip)],
-        port=PORT,
-        properties={
-            "worker_id": worker_id,
-            "display_name": hostname,
-            "status": "idle",
-            "platform": platform.system(),
-        },
-    )
-
-    print("Registering mDNS service...")
-    zeroconf.register_service(service_info)
-    print(f"Advertising as: {worker_id}.{SERVICE_TYPE}")
-
-    # Start TCP server
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", PORT))
-    server.listen(1)
-    print(f"TCP server listening on port {PORT}")
-    print("\n--- Waiting for connections (Ctrl+C to stop) ---\n")
-
-    try:
         while True:
-            conn, addr = server.accept()
-            print(f"Connection from {addr}")
-
-            # Read incoming data
-            data = conn.recv(4096)
-            if data:
-                print(f"Received: {data.decode()}")
-                # Send a simple response
-                conn.send(b'{"type": "status", "state": "connected"}\n')
-
-            conn.close()
-            print(f"Connection closed\n")
+            await asyncio.sleep(3600)
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\nStopping host...")
     finally:
-        zeroconf.unregister_service(service_info)
-        zeroconf.close()
-        server.close()
+        if host_service.get_state().running:
+            await host_service.stop()
+        discovery_service.stop()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

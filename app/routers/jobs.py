@@ -1,83 +1,77 @@
+from __future__ import annotations
+
 import uuid
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
-from app.models.messages import RunJobRequest
+from typing import Optional, Tuple
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
+
+from app.models.messages import ErrorMessage, RunJobRequest
 from app.services.discovery import discovery_service
-from app.services.worker_client import WorkerClient
+from app.services.system_info import get_display_name
+from app.services.worker_client import HostClient
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+router = APIRouter(tags=["jobs"])
 
 
-class SubmitJobRequest(BaseModel):
-    worker_id: str
+class WebJobRequest(BaseModel):
+    job_name: str = "Untitled Job"
     code: str
     filename: str = "main.py"
-    timeout_secs: int = 300
+    timeout_secs: int = Field(default=300, ge=1, le=3600)
+    host: Optional[str] = None
+    port: Optional[int] = None
 
 
-@router.post("/submit")
-async def submit_job(request: SubmitJobRequest):
-    """Submit a job to a worker. Returns job_id for tracking."""
-    workers = discovery_service.get_workers()
-    if request.worker_id not in workers:
-        raise HTTPException(status_code=404, detail="Worker not found")
-
-    job_id = str(uuid.uuid4())
-    worker = workers[request.worker_id]
-
-    return {
-        "job_id": job_id,
-        "worker_id": request.worker_id,
-        "worker_host": worker.host,
-        "worker_port": worker.port,
-        "message": "Use WebSocket /jobs/ws/{job_id} to execute and stream logs"
-    }
-
-
-@router.websocket("/ws/{worker_id}")
-async def job_websocket(websocket: WebSocket, worker_id: str):
-    """
-    WebSocket endpoint for job execution and log streaming.
-
-    Client sends: {"code": "...", "filename": "main.py", "timeout_secs": 300}
-    Server streams: stdout, stderr, status, metrics, done/error messages
-    """
+@router.websocket("/api/jobs/ws/{host_id}")
+@router.websocket("/jobs/ws/{host_id}")
+async def job_websocket(websocket: WebSocket, host_id: str) -> None:
     await websocket.accept()
-
-    workers = discovery_service.get_workers()
-    if worker_id not in workers:
-        await websocket.send_json({"type": "error", "message": "Worker not found"})
-        await websocket.close()
-        return
-
-    worker = workers[worker_id]
-    client = WorkerClient(worker.host, worker.port)
+    client: Optional[HostClient] = None
+    job_id: Optional[str] = None
 
     try:
+        payload = WebJobRequest.model_validate(await websocket.receive_json())
+        target_host, target_port = _resolve_target(host_id, payload.host, payload.port)
+        client = HostClient(target_host, target_port)
         await client.connect()
 
-        # Receive job request from GUI
-        data = await websocket.receive_json()
         job_id = str(uuid.uuid4())
-
-        job_request = RunJobRequest(
-            job_id=job_id,
-            code=data.get("code", ""),
-            filename=data.get("filename", "main.py"),
-            timeout_secs=data.get("timeout_secs", 300),
+        await client.send_job(
+            RunJobRequest(
+                job_id=job_id,
+                job_name=payload.job_name,
+                guest_name=get_display_name(),
+                filename=payload.filename,
+                timeout_secs=payload.timeout_secs,
+                code=payload.code,
+            )
         )
 
-        await websocket.send_json({"type": "status", "state": "starting", "job_id": job_id})
-        await client.send_job(job_request)
-
-        # Stream responses from worker to GUI
         async for message in client.stream_responses():
             await websocket.send_json(message)
-
     except WebSocketDisconnect:
-        await client.cancel_job(job_id)
-    except Exception as e:
-        await websocket.send_json({"type": "error", "message": str(e)})
+        if client and job_id:
+            try:
+                await client.cancel_job(job_id)
+            except Exception:
+                pass
+    except Exception as exc:
+        await websocket.send_json(ErrorMessage(job_id=job_id, message=str(exc)).model_dump(mode="json"))
     finally:
-        await client.disconnect()
+        if client:
+            await client.disconnect()
         await websocket.close()
+
+
+def _resolve_target(host_id: str, manual_host: Optional[str], manual_port: Optional[int]) -> Tuple[str, int]:
+    if host_id == "manual":
+        if not manual_host or not manual_port:
+            raise ValueError("Manual host selection requires both host and port.")
+        return manual_host, manual_port
+
+    hosts = discovery_service.get_hosts()
+    host = hosts.get(host_id)
+    if not host:
+        raise ValueError("Host not found.")
+    return host.host, host.port

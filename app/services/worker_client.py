@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import json
 from typing import AsyncGenerator, Optional
-from app.models.messages import RunJobRequest, CancelJobRequest
+
+from app.models.messages import CancelJobRequest, RunJobRequest
 
 
-class WorkerClient:
-    """TCP client for communicating with worker nodes."""
-
+class HostClient:
     def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
@@ -14,37 +15,27 @@ class WorkerClient:
         self.writer: Optional[asyncio.StreamWriter] = None
 
     async def connect(self) -> None:
-        self.reader, self.writer = await asyncio.open_connection(
-            self.host, self.port
-        )
+        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
 
     async def disconnect(self) -> None:
-        if self.writer:
-            self.writer.close()
+        if not self.writer:
+            return
+        self.writer.close()
+        try:
             await self.writer.wait_closed()
-            self.writer = None
+        finally:
             self.reader = None
+            self.writer = None
 
     async def send_job(self, request: RunJobRequest) -> None:
-        if not self.writer:
-            raise ConnectionError("Not connected to worker")
-
-        message = request.model_dump_json() + "\n"
-        self.writer.write(message.encode())
-        await self.writer.drain()
+        await self._send_message(request.model_dump(mode="json"))
 
     async def cancel_job(self, job_id: str) -> None:
-        if not self.writer:
-            raise ConnectionError("Not connected to worker")
-
-        request = CancelJobRequest(job_id=job_id)
-        message = request.model_dump_json() + "\n"
-        self.writer.write(message.encode())
-        await self.writer.drain()
+        await self._send_message(CancelJobRequest(job_id=job_id).model_dump(mode="json"))
 
     async def stream_responses(self) -> AsyncGenerator[dict, None]:
         if not self.reader:
-            raise ConnectionError("Not connected to worker")
+            raise ConnectionError("Not connected to host")
 
         while True:
             line = await self.reader.readline()
@@ -52,10 +43,19 @@ class WorkerClient:
                 break
 
             try:
-                data = json.loads(line.decode().strip())
-                yield data
-
-                if data.get("type") in ("done", "error"):
-                    break
+                message = json.loads(line.decode().strip())
             except json.JSONDecodeError:
                 continue
+
+            yield message
+            if message.get("type") in {"done", "error"}:
+                break
+
+    async def _send_message(self, payload: dict) -> None:
+        if not self.writer:
+            raise ConnectionError("Not connected to host")
+        self.writer.write((json.dumps(payload) + "\n").encode())
+        await self.writer.drain()
+
+
+WorkerClient = HostClient

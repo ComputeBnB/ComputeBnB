@@ -1,435 +1,180 @@
 # ComputeBnb
 
-ComputeBnb is a hackathon MVP for sharing idle computers on a local network as temporary execution nodes.
+ComputeBnb is a LAN-only hackathon MVP for sending a single-file Python job from a `guest` machine to a `host` machine, running it in Docker, and streaming live output back to the guest UI.
 
-The demo lets one machine discover available worker machines on the same LAN, choose one, send a Python job, and receive live logs and final results back.
+The repo now contains both:
 
-## MVP Goal
+- a Python FastAPI control plane for discovery, host mode, TCP bridging, and execution
+- the React UI originally built on the `gui` branch, now wired to the live backend
 
-Build a cross-platform LAN demo where:
+## What Works
 
-- worker machines advertise themselves automatically - each worker is called a `host`
-- a client discovers available workers on the network - each client is called a `guest`
-- the user selects a worker manually
-- the client sends a Python job with a timeout
-- the worker executes it and streams logs back in real time
+- mDNS host discovery over the local network
+- manual IP + port fallback when discovery does not show a host
+- one-click host mode from the UI
+- host-side accept or deny flow before a job starts
+- TCP job transport using newline-delimited JSON
+- Docker-first Python execution with `python:3.11-slim`
+- subprocess fallback in trusted-demo mode when Docker is unavailable
+- live stdout and stderr streaming in the UI
+- timeout enforcement and cleanup
+- final result screen with runtime, backend, logs, and output file list
+- automatic TCP connection close after the final result
 
-## Scope
+## Repo Layout
 
-### Included
+```text
+app/
+  main.py                 FastAPI app and SPA serving
+  routers/                API + WebSocket routes
+  services/               discovery, host server, TCP client, execution runtime
+src/                      React UI ported from the gui branch
+src-tauri/                Original Tauri shell from the gui branch
+tests/                    Python smoke tests for runtime and TCP roundtrip
+worker/test_worker.py     Standalone host launcher for local smoke testing
+```
 
-- LAN-only discovery
-- mDNS-based worker discovery
-- TCP connection for job execution and log streaming
-- Python-only execution
-- manual worker selection
-- real-time stdout/stderr streaming
-- timeout enforcement
-- final job status reporting
-- Docker-based Python execution
-- cross-platform worker support for macOS, Windows, and Linux
+## Runtime Notes
 
-### Excluded
+- Recommended local interpreter: Python 3.11
+- Current package metadata allows Python 3.9+ so the app can still run in more dev environments
+- Remote job execution still targets Docker image `python:3.11-slim`
 
-- internet-wide discovery
-- NAT traversal
-- decentralized scheduling
-- automatic "earliest accept wins" assignment
-- billing, payments, reputation, or marketplace mechanics
-- strong production-grade sandboxing
+## Quick Start
 
-## Architecture
+### Option 1: one command
 
-### Components
+```bash
+./run.sh
+```
 
-#### Host 
+This will:
 
-Runs the program of the `guest`.
+- create `.venv` if needed
+- install Python dependencies
+- install frontend dependencies if needed
+- build the React UI
+- start FastAPI on `http://localhost:8000`
 
-Responsibilities:
-- advertise itself on the LAN using mDNS
-- expose a TCP server for job (program) execution
-- manually accept one job
-- run Python code
-- stream logs and status updates back to the client
-- enforce job timeout
-- report idle or busy state
+### Option 2: split backend + frontend for development
 
-#### Guest
+Backend:
 
-A lightweight web UI or local app used by the requester.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install .[dev]
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-Responsibilities:
-- discover workers on the LAN using mDNS
-- show available workers in a list
-- allow manual worker selection
-- accept Python code input and timeout setting
-- connect to the selected worker over TCP
-- display live logs, metrics, and final status
+Frontend:
 
-#### Execution Layer
+```bash
+npm install
+npm run dev
+```
 
-Runs user jobs on the worker.
+The Vite dev server proxies `/api` and WebSocket traffic to `http://127.0.0.1:8000`.
 
-Primary:
-- Docker with a fixed Python image
+## Demo Flow
 
-Fallback:
-- local subprocess execution in trusted-demo mode
+### Guest machine
 
-## Network Design
+1. Open the app
+2. Wait for discovered hosts or enter a manual IP and port
+3. Select a host
+4. Paste Python code, set a timeout, and request execution
+5. Watch the approval state, live logs, and final result
+6. Return to the host list after completion
 
-### Discovery: mDNS
+### Host machine
 
-Hosts advertise a service such as:
-
-`_compute-worker._tcp.local`
-
-Each worker publishes metadata like:
-- `worker_id`
-- `ipv4`
-- `display_name`
-- `tcp_port`
-- `status`
-- `platform`
-
-The client browses for this service and updates the available worker list automatically.
-
-Why mDNS:
-- zero-config LAN discovery
-- cleaner than building custom UDP discovery logic
-- simple user experience for a local network demo
-
-### Connection: TCP
-
-After the user selects a worker:
-- the client opens a TCP connection to the worker
-- the client sends a job payload
-- the worker streams logs, metrics, and status over the same connection
-
-Why TCP:
-- reliable delivery
-- simple request/response flow
-- good fit for long-running streams
-
-## Execution Model
-
-### Python-Only Jobs
-
-To keep the MVP small and reliable, the system supports Python only.
-
-Recommended input:
-- a single Python file as text
-
-Optional later:
-- a zipped Python project with `main.py`
-- drag-and-drop folder upload with auto-zip in the UI
-
-Entrypoint:
-- `python main.py`
-
-### Docker Runtime
-
-Docker is part of the main MVP plan.
-
-Recommended container image:
-- `python:3.11-slim`
-
-Worker flow:
-- receive Python code over TCP
-- write job files into a temporary working directory
-- start a Docker container with that directory mounted
-- run `python main.py`
-- stream logs back to the client
-- stop and clean up the container when the job finishes or times out
-
-Recommended limits:
-- one container per worker at a time
-- CPU and memory caps if easy to add
-- timeout enforced by the worker even if the container hangs
-- disable networking later if time permits
-
-### Timeout
-
-Each job includes a user-selected timeout.
-
-Rules:
-- worker starts a timer when execution begins
-- worker terminates the job when timeout is reached
-- maximum timeout can be capped at 1 hour
-
-### Output Streaming
-
-The worker streams:
-- `stdout`
-- `stderr`
-- status changes
-- optional CPU and memory metrics
-
-Final states:
-- `done`
-- `failed`
-- `timeout`
-
-## Security Approach
-
-### Recommendation
-
-Use Docker as the default execution path. Do not use VMs for this hackathon.
-
-#### Docker
-
-Pros:
-- fixed Python environment
-- better isolation than raw subprocesses
-- easier resource limiting
-- better demo story
-
-Cons:
-- requires Docker to be installed and running
-- adds setup and integration work
-
-#### VM
-
-Cons:
-- too heavy for an 8-hour build
-- too much platform complexity
-- slower startup
-- not worth it for this MVP
-
-#### Subprocess Fallback
-
-If Docker fails on a demo machine or takes too long on one platform, use local subprocess execution as an emergency fallback.
-
-This should be treated as trusted-demo mode only.
-
-## Tech Stack
-
-### Backend and Worker
-
-Implement the worker agent and local control logic in Python.
-
-Recommended pieces:
-- `Python 3.11`
-- `zeroconf` for mDNS discovery
-- `socket` or `asyncio` for TCP communication
-- `subprocess` for Docker execution and fallback local execution
-
-Why Python:
-- fastest to build in a hackathon
-- simpler debugging and iteration
-- matches the Python-only execution model
-- easy Docker integration
-- works across macOS, Windows, and Linux
-
-### Client
-
-Use a browser-based UI served by FastAPI.
-
-Why:
-- no frontend framework setup overhead
-- easy to serve HTML templates and static assets from the same app
-- simple local GUI story for a hackathon demo
-- no desktop packaging work
-- easiest way to stay cross-platform
-- fast to demo
-
-Recommended pieces:
-- `FastAPI`
-- server-rendered templates or simple static HTML, CSS, and JavaScript
-
-### Container Runtime
-
-Use Docker as the default execution environment.
-
-Recommended image:
-- `python:3.11-slim`
-
-### Cross-Platform Plan
-
-The system stays cross-platform by using:
-- Python for the worker and backend logic
-- browser UI for the client
-- Docker for a consistent execution environment where available
-
-If Docker is not available on a demo machine, the worker can fall back to local subprocess execution in trusted-demo mode.
+1. Open the app
+2. Click `Host This Computer`
+3. Wait for a guest request
+4. Accept or deny the pending job
+5. After completion, the host returns to its idle screen and the TCP session closes
 
 ## Protocol
 
-Use newline-delimited JSON over TCP.
+Transport is newline-delimited JSON over TCP.
 
-### Client to Worker
-
-#### Run Job
+Guest to host:
 
 ```json
-{ "type": "run", "job_id": "job-1", "filename": "main.py", "timeout_secs": 300, "code": "print('hi')" }
+{ "type": "run", "job_id": "job-1", "job_name": "Quick Python Job", "filename": "main.py", "timeout_secs": 120, "guest_name": "My Laptop", "code": "print('hi')" }
 ```
-
-Initial MVP note:
-- support `code` first
-- treat zip project upload as a stretch goal
-
-#### Cancel Job
 
 ```json
 { "type": "cancel", "job_id": "job-1" }
 ```
 
-### Worker to Client
-
-#### Status
+Host to guest examples:
 
 ```json
-{ "type": "status", "state": "starting" }
+{ "type": "status", "job_id": "job-1", "state": "awaiting_accept", "message": "Waiting for the host to accept this job." }
 ```
-
-#### Stdout
 
 ```json
-{ "type": "stdout", "data": "hello\n" }
+{ "type": "stdout", "job_id": "job-1", "data": "hello\n" }
 ```
-
-#### Stderr
 
 ```json
-{ "type": "stderr", "data": "error\n" }
+{ "type": "stderr", "job_id": "job-1", "data": "Docker unavailable; running in trusted-demo subprocess mode.\n" }
 ```
-
-#### Metrics
 
 ```json
-{ "type": "metrics", "cpu_pct": 12.3, "mem_mb": 48 }
+{ "type": "metrics", "job_id": "job-1", "cpu_pct": 0, "mem_mb": 0, "elapsed_secs": 2.1 }
 ```
-
-#### Done
 
 ```json
-{ "type": "done", "exit_code": 0, "duration_ms": 820 }
+{ "type": "done", "job_id": "job-1", "state": "done", "exit_code": 0, "duration_ms": 820, "backend": "docker", "artifacts": [], "summary": "Finished successfully on docker with no output files produced." }
 ```
-
-#### Error
 
 ```json
-{ "type": "error", "message": "worker busy" }
+{ "type": "error", "job_id": "job-1", "message": "The host declined the job or did not respond in time." }
 ```
 
-## User Flow
+## Docker Fallback Behavior
 
-1. Worker starts
-2. Worker advertises itself via mDNS
-3. Client opens and discovers workers on the LAN
-4. User selects a worker
-5. User pastes Python code or uploads a single file
-6. User sets a timeout
-7. Client sends the job over TCP
-8. Worker starts a Docker container and executes the job
-9. Client receives live logs and status updates
-10. Job finishes or times out
-11. Worker returns to idle
+ComputeBnb tries Docker first.
 
-## Team Plan
+If Docker is not installed or not running on the host, the job runs locally with the host Python interpreter and the UI labels that path as trusted-demo mode.
 
-### Developer 1: Worker Agent
+You can force fallback mode in development with:
 
-- build TCP server
-- implement job lifecycle
-- enforce timeout
-- stream logs
+```bash
+export COMPUTEBNB_DISABLE_DOCKER=1
+```
 
-### Developer 2: Discovery and Protocol
+## Standalone Host Smoke Test
 
-- implement mDNS advertise and browse
-- define JSON message schema
-- handle client-worker connection flow
+If you want to advertise a host without opening the UI:
 
-### Developer 3: Frontend
+```bash
+source .venv/bin/activate
+python worker/test_worker.py
+```
 
-- build worker list UI
-- build Python code submission UI
-- show live logs
-- show job status and timer
+That script starts mDNS advertisement and the TCP host listener directly.
 
-### Developer 4: Execution and Integration
+## Tests
 
-- add Docker runner
-- add subprocess fallback
-- add metrics collection
-- integrate and stabilize demo
+```bash
+source .venv/bin/activate
+pytest
+```
 
-## 8-Hour Plan
+Current smoke coverage includes:
 
-### Hour 1
+- subprocess fallback execution and output collection
+- TCP roundtrip through the host accept flow
 
-- lock scope
-- finalize protocol
-- assign ownership
+## Known MVP Limits
 
-### Hour 2
-
-- make workers advertise over mDNS
-- make client discover workers
-
-### Hour 3
-
-- establish TCP connection from client to worker
-
-### Hour 4
-
-- execute a simple Python script in Docker
-- return success or failure
-
-### Hour 5
-
-- stream stdout and stderr live
-- enforce timeout
-
-### Hour 6
-
-- add metrics and status transitions
-- handle busy and idle worker state
-
-### Hour 7
-
-- finalize Docker path and keep subprocess fallback ready
-- test on multiple machines
-
-### Hour 8
-
-- polish UI
-- fix demo bugs
-- rehearse pitch and fallback demo flow
-
-## Definition of Done
-
-The MVP is done when:
-
-- at least two workers appear automatically on the LAN
-- the client can select a worker
-- the user can submit a Python script
-- the worker runs the script in Docker
-- logs stream in real time
-- timeout works correctly
-- final state is shown cleanly
-- the demo works on at least two machines
-
-## Risks
-
-- mDNS may behave differently across networks
-- Docker setup may take too long
-- Docker may not be installed or running on every machine
-- live log streaming may be buggy
-- Python runtime differences may affect subprocess fallback
-
-## Mitigation
-
-- keep manual IP connect as a backup
-- verify Docker early on all worker machines
-- keep subprocess execution as a fallback if Docker slips
-- support only one job at a time per worker
-- support only single-file Python scripts in the initial MVP
-- test early on real machines
-
-## Pitch
-
-"ComputeBnb turns idle computers on a local network into temporary execution nodes. A worker machine advertises itself, a client discovers it, sends a Python job, and watches the logs stream back live."
+- one active job per host
+- single-file Python only
+- output files are listed in the guest UI but not yet downloaded back to the guest
+- Tauri shell files are still present from the original `gui` branch, but the primary supported flow is the FastAPI + React app
+- sandboxing is still hackathon-grade only

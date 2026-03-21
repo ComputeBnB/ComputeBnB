@@ -1,22 +1,26 @@
-from fastapi import APIRouter, HTTPException
+from __future__ import annotations
+
 from typing import List
-from app.models.messages import WorkerInfo
+
+from fastapi import APIRouter, HTTPException
+
+from app.models.messages import HostInfo
 from app.services.discovery import discovery_service
 
-router = APIRouter(prefix="/workers", tags=["workers"])
+router = APIRouter(tags=["hosts"])
 
 
-@router.get("", response_model=List[WorkerInfo])
-async def list_workers():
-    """List all discovered workers on the LAN."""
-    workers = discovery_service.get_workers()
-    return list(workers.values())
+@router.get("/api/hosts", response_model=List[HostInfo])
+@router.get("/workers", response_model=List[HostInfo])
+async def list_hosts() -> list[HostInfo]:
+    hosts = discovery_service.get_hosts()
+    return list(hosts.values())
 
 
-@router.get("/{worker_id}", response_model=WorkerInfo)
-async def get_worker(worker_id: str):
-    """Get a specific worker by ID."""
-    workers = discovery_service.get_workers()
-    if worker_id not in workers:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    return workers[worker_id]
+@router.get("/api/hosts/{host_id}", response_model=HostInfo)
+@router.get("/workers/{host_id}", response_model=HostInfo)
+async def get_host(host_id: str) -> HostInfo:
+    hosts = discovery_service.get_hosts()
+    if host_id not in hosts:
+        raise HTTPException(status_code=404, detail="Host not found")
+    return hosts[host_id]

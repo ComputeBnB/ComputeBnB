@@ -1,8 +1,12 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "computebnb"
 version = "0.1.0"
 description = "P2P compute sharing on local network"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
@@ -19,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-computebnb = "app.main:app"
+computebnb = "app.cli:main"
 
 [tool.uv]
 dev-dependencies = [
