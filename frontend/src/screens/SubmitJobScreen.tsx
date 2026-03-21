@@ -252,6 +252,7 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
                   className="block"
                   disabled={!!code || !!folderFiles}
                 />
+                // @ts-ignore - webkitdirectory is not in standard typings
                 <input
                   type="file"
                   webkitdirectory="true"

@@ -151,4 +151,4 @@ async def download_output_file(request_id: str, filename: str):
     def file_iterator():
         with open(found, 'rb') as f:
             yield from f
-    return StreamingResponse(file_iterator(), media_type="application/octet-stream", headers={"Content-Disposition": f"attachment; filename={filename}"}
+    return StreamingResponse(file_iterator(), media_type="application/octet-stream", headers={"Content-Disposition": f"attachment; filename={filename}"})
