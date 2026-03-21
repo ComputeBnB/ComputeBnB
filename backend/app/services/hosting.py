@@ -39,6 +39,28 @@ class HostingService:
         self.active_job: Optional[dict] = None
         self.active_job_logs: list = []
 
+    async def _update_advertised_status(self, status: WorkerStatus) -> None:
+        self.status = status
+
+        if not self.is_hosting or not self.zeroconf or not self.service_info:
+            return
+
+        properties = dict(self.service_info.properties)
+        properties["status"] = status.value
+
+        updated_info = ServiceInfo(
+            SERVICE_TYPE,
+            self.service_info.name,
+            addresses=self.service_info.addresses,
+            port=self.service_info.port,
+            properties=properties,
+            server=self.service_info.server,
+        )
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.zeroconf.update_service, updated_info)
+        self.service_info = updated_info
+
     def get_local_ip(self) -> str:
         """Get local IP address."""
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -55,7 +77,6 @@ class HostingService:
             return {"status": "already_hosting", "worker_id": self.worker_id}
 
         self.is_hosting = True
-        self.status = WorkerStatus.IDLE
         local_ip = self.get_local_ip()
         hostname = socket.gethostname()
 
@@ -75,6 +96,7 @@ class HostingService:
             },
         )
         await loop.run_in_executor(None, self.zeroconf.register_service, self.service_info)
+        await self._update_advertised_status(WorkerStatus.IDLE)
 
         return {
             "status": "hosting_started",
@@ -102,6 +124,8 @@ class HostingService:
         # Clear pending requests and tokens
         self.pending_requests.clear()
         self.active_tokens.clear()
+        self.active_job = None
+        self.active_job_logs = []
 
         return {"status": "hosting_stopped"}
 
@@ -194,7 +218,7 @@ class HostingService:
             yield {"type": "error", "message": "Request not found"}
             return
 
-        self.status = WorkerStatus.BUSY
+        await self._update_advertised_status(WorkerStatus.BUSY)
         start_time = time.time()
 
         # Track active job for host UI
@@ -299,9 +323,7 @@ class HostingService:
         except Exception as e:
             yield {"type": "error", "message": str(e), "job_id": request_id}
         finally:
-            self.status = WorkerStatus.IDLE
-            if self.active_job:
-                self.active_job["state"] = "done"
+            await self._update_advertised_status(WorkerStatus.IDLE)
             if request_id in self.pending_requests:
                 del self.pending_requests[request_id]
             to_remove = [
@@ -310,6 +332,8 @@ class HostingService:
             ]
             for t in to_remove:
                 del self.active_tokens[t]
+            self.active_job = None
+            self.active_job_logs = []
             temp_dir.cleanup()
 
     def get_status(self):
