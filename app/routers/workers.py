@@ -6,7 +6,7 @@ from app.services.discovery import discovery_service
 router = APIRouter(prefix="/workers", tags=["workers"])
 
 
-@router.get("/", response_model=List[WorkerInfo])
+@router.get("", response_model=List[WorkerInfo])
 async def list_workers():
     """List all discovered workers on the LAN."""
     workers = discovery_service.get_workers()
