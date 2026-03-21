@@ -1,14 +1,27 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Upload, PlayCircle, Cpu, HardDrive, Layers, Clock, Globe } from 'lucide-react';
-import { Worker } from '../types';
+import React, { useState } from "react";
+import {
+  ArrowLeft,
+  Upload,
+  PlayCircle,
+  Cpu,
+  HardDrive,
+  Layers,
+  Clock,
+  Globe,
+} from "lucide-react";
+import { Worker } from "../types";
 
 // Tauri APIs — only available when running as a Tauri app
-let tauriDialog: typeof import('@tauri-apps/api/dialog') | null = null;
-let tauriFs: typeof import('@tauri-apps/api/fs') | null = null;
+let tauriDialog: typeof import("@tauri-apps/api/dialog") | null = null;
+let tauriFs: typeof import("@tauri-apps/api/fs") | null = null;
 
 try {
-  import('@tauri-apps/api/dialog').then((m) => { tauriDialog = m; });
-  import('@tauri-apps/api/fs').then((m) => { tauriFs = m; });
+  import("@tauri-apps/api/dialog").then((m) => {
+    tauriDialog = m;
+  });
+  import("@tauri-apps/api/fs").then((m) => {
+    tauriFs = m;
+  });
 } catch {
   // Not in Tauri — file browse won't be available
 }
@@ -23,9 +36,13 @@ interface SubmitJobScreenProps {
   }) => void;
 }
 
-export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack, onSubmit }) => {
-  const [jobName, setJobName] = useState('');
-  const [code, setCode] = useState('');
+export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
+  worker,
+  onBack,
+  onSubmit,
+}) => {
+  const [jobName, setJobName] = useState("");
+  const [code, setCode] = useState("");
   const [timeoutSecs, setTimeoutSecs] = useState(300);
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
 
@@ -33,7 +50,7 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
     e.preventDefault();
     if (!code.trim()) return;
     onSubmit({
-      name: jobName || 'Untitled Job',
+      name: jobName || "Untitled Job",
       code,
       timeoutSecs,
     });
@@ -41,24 +58,25 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
 
   const handleBrowseFile = async () => {
     if (!tauriDialog || !tauriFs) {
-      alert('File browsing is only available in the desktop app.');
+      alert("File browsing is only available in the desktop app.");
       return;
     }
 
     try {
       const selected = await tauriDialog.open({
         multiple: false,
-        filters: [{ name: 'Python', extensions: ['py'] }],
+        filters: [{ name: "Python", extensions: ["py"] }],
       });
 
-      if (selected && typeof selected === 'string') {
+      if (selected && typeof selected === "string") {
         const contents = await tauriFs.readTextFile(selected);
         setCode(contents);
-        const fileName = selected.split('/').pop() || selected.split('\\').pop() || selected;
+        const fileName =
+          selected.split("/").pop() || selected.split("\\").pop() || selected;
         setLoadedFileName(fileName);
       }
     } catch (err) {
-      console.error('File browse error:', err);
+      console.error("File browse error:", err);
     }
   };
 
@@ -97,17 +115,23 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
               </button>
             </div>
             <div className="space-y-2">
-              <div className="text-base font-semibold text-app-text">{worker.name}</div>
+              <div className="text-base font-semibold text-app-text">
+                {worker.name}
+              </div>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 {worker.specs ? (
                   <>
                     <div className="flex items-center gap-2">
                       <Cpu size={14} className="text-app-text-tertiary" />
-                      <span className="text-app-text-secondary">{worker.specs.cpuCores} cores</span>
+                      <span className="text-app-text-secondary">
+                        {worker.specs.cpuCores} cores
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <HardDrive size={14} className="text-app-text-tertiary" />
-                      <span className="text-app-text-secondary">{worker.specs.ram}</span>
+                      <span className="text-app-text-secondary">
+                        {worker.specs.ram}
+                      </span>
                     </div>
                     {worker.specs.gpu && (
                       <div className="flex items-center gap-2">
@@ -119,7 +143,9 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
                 ) : (
                   <div className="flex items-center gap-2">
                     <Globe size={14} className="text-app-text-tertiary" />
-                    <span className="text-app-text-secondary">{worker.host}:{worker.port}</span>
+                    <span className="text-app-text-secondary">
+                      {worker.host}:{worker.port}
+                    </span>
                   </div>
                 )}
               </div>
@@ -150,11 +176,20 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
               <textarea
                 value={code}
                 onChange={(e) => {
-                  setCode(e.target.value);
+                  const sanitized = e.target.value
+                    .replace(/[\u201C\u201D]/g, '"')
+                    .replace(/[\u2018\u2019]/g, "'");
+                  setCode(sanitized);
                   setLoadedFileName(null);
                 }}
-                placeholder={'# Write your Python code here\nprint("Hello from ComputeBnB!")'}
+                placeholder={
+                  '# Write your Python code here\nprint("Hello from ComputeBnB!")'
+                }
                 rows={12}
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-gramm="false"
                 className="w-full px-4 py-3 rounded-lg bg-app-surface border border-app-border text-app-text placeholder:text-app-text-tertiary focus:outline-none focus:border-app-accent transition-colors font-mono text-sm leading-relaxed resize-none"
               />
               <div className="flex items-center gap-3 mt-2">
@@ -184,12 +219,19 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({ worker, onBack
                   <input
                     type="number"
                     value={timeoutSecs}
-                    onChange={(e) => setTimeoutSecs(Math.max(10, parseInt(e.target.value) || 300))}
+                    onChange={(e) =>
+                      setTimeoutSecs(
+                        Math.max(10, parseInt(e.target.value) || 300),
+                      )
+                    }
                     min={10}
                     max={3600}
                     className="w-full px-4 py-2.5 pl-10 rounded-lg bg-app-surface border border-app-border text-app-text focus:outline-none focus:border-app-accent transition-colors"
                   />
-                  <Clock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-tertiary" />
+                  <Clock
+                    size={16}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-tertiary"
+                  />
                 </div>
                 <span className="text-sm text-app-text-secondary">seconds</span>
               </div>
