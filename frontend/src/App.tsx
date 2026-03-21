@@ -1,6 +1,17 @@
-import { useState, useEffect } from "react";
-import { AppStage, AppMode, Worker, Job } from "./types";
-import { mockWorkers, mockLogs, mockJobResult } from "./mockData";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { AppStage, AppMode, Worker, Job, JobResult, JobStatus, HostingRequest } from "./types";
+import {
+  fetchWorkers,
+  fetchWorkerSpecs,
+  startHosting,
+  stopHosting,
+  fetchHostingRequests,
+  approveRequest,
+  denyRequest,
+  submitJob,
+  pollJobStatus,
+  createJobWebSocket,
+} from "./api";
 import { WorkerListScreen } from "./screens/WorkerListScreen";
 import { SubmitJobScreen } from "./screens/SubmitJobScreen";
 import { JobExecutionScreen } from "./screens/JobExecutionScreen";
@@ -10,41 +21,65 @@ import { HostModeScreen } from "./screens/HostModeScreen";
 function App() {
   const [mode, setMode] = useState<AppMode>("guest");
   const [stage, setStage] = useState<AppStage>("discover");
+
+  // Guest state
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [workersLoading, setWorkersLoading] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
   const [currentJob, setCurrentJob] = useState<Job | null>(null);
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [jobStatus, setJobStatus] = useState<JobStatus>("pending");
+  const [jobResult, setJobResult] = useState<JobResult | null>(null);
 
-  // Simulate log streaming during execution
+  // Host state
+  const [hostingRequests, setHostingRequests] = useState<HostingRequest[]>([]);
+  const [hostIp, setHostIp] = useState<string | null>(null);
+
+  // Refs for cleanup
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hostPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Worker Discovery ──────────────────────────────────────────────
+
+  const loadWorkers = useCallback(async () => {
+    setWorkersLoading(true);
+    try {
+      const list = await fetchWorkers();
+      setWorkers(list);
+      // Fetch specs for each worker in parallel
+      const specsPromises = list.map(async (w) => {
+        try {
+          const specs = await fetchWorkerSpecs(w.host, w.port);
+          return { id: w.id, specs };
+        } catch {
+          return { id: w.id, specs: undefined };
+        }
+      });
+      const specsResults = await Promise.all(specsPromises);
+      setWorkers((prev) =>
+        prev.map((w) => {
+          const found = specsResults.find((s) => s.id === w.id);
+          return found?.specs ? { ...w, specs: found.specs } : w;
+        })
+      );
+    } catch (err) {
+      console.error("Failed to load workers:", err);
+    } finally {
+      setWorkersLoading(false);
+    }
+  }, []);
+
+  // Load workers on mount and when returning to discover
   useEffect(() => {
-    if (stage === "execution" && executionLogs.length < mockLogs.length) {
-      const timer = setTimeout(() => {
-        setExecutionLogs((prev) => [...prev, mockLogs[prev.length]]);
-      }, 1500); // Add a new log every 1.5 seconds
-
-      return () => clearTimeout(timer);
+    if (mode === "guest" && stage === "discover") {
+      loadWorkers();
     }
+  }, [mode, stage, loadWorkers]);
 
-    // When all logs are complete, transition to complete screen
-    if (stage === "execution" && executionLogs.length === mockLogs.length) {
-      const completeTimer = setTimeout(() => {
-        setStage("complete");
-      }, 2000);
-
-      return () => clearTimeout(completeTimer);
-    }
-  }, [stage, executionLogs.length]);
-
-  // Simulate elapsed time counter during execution
-  useEffect(() => {
-    if (stage === "execution") {
-      const timer = setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
-      }, 1000);
-
-      return () => clearInterval(timer);
-    }
-  }, [stage]);
+  // ── Guest: Job Submission & Execution ─────────────────────────────
 
   const handleSelectWorker = (worker: Worker) => {
     setSelectedWorker(worker);
@@ -56,53 +91,250 @@ function App() {
     setSelectedWorker(null);
   };
 
-  const handleSubmitJob = (jobData: {
+  const handleSubmitJob = async (jobData: {
     name: string;
-    pythonFile: string;
-    configFile?: string;
-    arguments?: string;
-    notes?: string;
+    code: string;
+    timeoutSecs: number;
   }) => {
     if (!selectedWorker) return;
 
-    const job: Job = {
-      id: `job-${Date.now()}`,
-      name: jobData.name,
-      worker: selectedWorker,
-      pythonFile: jobData.pythonFile,
-      configFile: jobData.configFile,
-      arguments: jobData.arguments,
-      notes: jobData.notes,
-      status: "running",
-      startTime: new Date(),
-      logs: [],
+    try {
+      const result = await submitJob(
+        selectedWorker,
+        jobData.code,
+        jobData.name || "anonymous",
+        jobData.timeoutSecs
+      );
+
+      const job: Job = {
+        id: `job-${Date.now()}`,
+        name: jobData.name || "Untitled Job",
+        worker: selectedWorker,
+        code: jobData.code,
+        requestId: result.request_id,
+        timeoutSecs: jobData.timeoutSecs,
+        status: "pending",
+        startTime: new Date(),
+        logs: [],
+      };
+
+      setCurrentJob(job);
+      setExecutionLogs([]);
+      setElapsedTime(0);
+      setJobStatus("pending");
+      setJobResult(null);
+      setStage("execution");
+
+      // Start polling for approval
+      startApprovalPolling(selectedWorker, result.request_id);
+    } catch (err) {
+      console.error("Failed to submit job:", err);
+      alert("Failed to submit job. Is the worker still hosting?");
+    }
+  };
+
+  const startApprovalPolling = (worker: Worker, requestId: string) => {
+    // Clear any existing poll
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await pollJobStatus(worker, requestId);
+        if (status.status === "accepted" && status.token) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setJobStatus("approved");
+          connectWebSocket(worker, requestId, status.token);
+        } else if (status.status === "denied") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setJobStatus("denied");
+        }
+      } catch (err) {
+        console.error("Poll error:", err);
+      }
+    }, 2000);
+  };
+
+  const connectWebSocket = (
+    worker: Worker,
+    requestId: string,
+    token: string
+  ) => {
+    const ws = createJobWebSocket(worker, requestId, token);
+    wsRef.current = ws;
+    const collectedOutput: string[] = [];
+
+    // Start elapsed time counter
+    timerRef.current = setInterval(() => {
+      setElapsedTime((prev) => prev + 1);
+    }, 1000);
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+
+      switch (msg.type) {
+        case "status":
+          if (msg.state === "running") {
+            setJobStatus("running");
+          }
+          setExecutionLogs((prev) => [
+            ...prev,
+            `[status] ${msg.state}`,
+          ]);
+          break;
+
+        case "stdout":
+          collectedOutput.push(msg.data);
+          setExecutionLogs((prev) => [...prev, msg.data]);
+          break;
+
+        case "stderr":
+          collectedOutput.push(`[stderr] ${msg.data}`);
+          setExecutionLogs((prev) => [...prev, `[stderr] ${msg.data}`]);
+          break;
+
+        case "done":
+          if (timerRef.current) clearInterval(timerRef.current);
+          setJobStatus("done");
+          setJobResult({
+            exitCode: msg.exit_code,
+            runtime: msg.duration_ms / 1000,
+            output: collectedOutput.join(""),
+          });
+          // Small delay so user sees the final log before transitioning
+          setTimeout(() => setStage("complete"), 1000);
+          break;
+
+        case "error":
+          if (timerRef.current) clearInterval(timerRef.current);
+          setJobStatus("error");
+          setExecutionLogs((prev) => [
+            ...prev,
+            `[error] ${msg.message}`,
+          ]);
+          setJobResult({
+            exitCode: 1,
+            runtime: elapsedTime,
+            output: collectedOutput.join(""),
+          });
+          setTimeout(() => setStage("complete"), 1500);
+          break;
+      }
     };
 
-    setCurrentJob(job);
-    setExecutionLogs([]);
-    setElapsedTime(0);
-    setStage("execution");
+    ws.onerror = () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setJobStatus("error");
+      setExecutionLogs((prev) => [
+        ...prev,
+        "[error] WebSocket connection failed",
+      ]);
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+    };
   };
 
   const handleReturnToWorkerList = () => {
+    // Cleanup
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
     setStage("discover");
     setSelectedWorker(null);
     setCurrentJob(null);
     setExecutionLogs([]);
     setElapsedTime(0);
+    setJobStatus("pending");
+    setJobResult(null);
   };
 
-  const handleStartHosting = () => {
-    setMode("host");
-    setStage("discover");
-    setSelectedWorker(null);
-    setCurrentJob(null);
+  // ── Host Mode ─────────────────────────────────────────────────────
+
+  const handleStartHosting = async () => {
+    try {
+      const result = await startHosting();
+      setHostIp(result.ip ?? null);
+      setMode("host");
+      setStage("discover");
+      setSelectedWorker(null);
+      setCurrentJob(null);
+
+      // Start polling for incoming requests
+      hostPollRef.current = setInterval(async () => {
+        try {
+          const requests = await fetchHostingRequests();
+          setHostingRequests(requests);
+        } catch {
+          // Might fail if not hosting anymore
+        }
+      }, 3000);
+    } catch (err) {
+      console.error("Failed to start hosting:", err);
+      alert("Failed to start hosting. Is the backend running?");
+    }
   };
 
-  const handleStopHosting = () => {
+  const handleStopHosting = async () => {
+    try {
+      await stopHosting();
+    } catch (err) {
+      console.error("Failed to stop hosting:", err);
+    }
+
+    if (hostPollRef.current) {
+      clearInterval(hostPollRef.current);
+      hostPollRef.current = null;
+    }
+    setHostingRequests([]);
+    setHostIp(null);
     setMode("guest");
     setStage("discover");
   };
+
+  const handleApproveRequest = async (requestId: string) => {
+    try {
+      await approveRequest(requestId);
+      setHostingRequests((prev) =>
+        prev.filter((r) => r.request_id !== requestId)
+      );
+    } catch (err) {
+      console.error("Failed to approve:", err);
+    }
+  };
+
+  const handleDenyRequest = async (requestId: string) => {
+    try {
+      await denyRequest(requestId);
+      setHostingRequests((prev) =>
+        prev.filter((r) => r.request_id !== requestId)
+      );
+    } catch (err) {
+      console.error("Failed to deny:", err);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (wsRef.current) wsRef.current.close();
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (hostPollRef.current) clearInterval(hostPollRef.current);
+    };
+  }, []);
 
   return (
     <div className="h-screen w-screen bg-app-bg flex flex-col">
@@ -131,14 +363,22 @@ function App() {
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden">
         {mode === "host" ? (
-          <HostModeScreen onStopHosting={handleStopHosting} />
+          <HostModeScreen
+            onStopHosting={handleStopHosting}
+            requests={hostingRequests}
+            onApprove={handleApproveRequest}
+            onDeny={handleDenyRequest}
+            hostIp={hostIp}
+          />
         ) : (
           <>
             {stage === "discover" && (
               <WorkerListScreen
-                workers={mockWorkers}
+                workers={workers}
+                loading={workersLoading}
                 onSelectWorker={handleSelectWorker}
                 onStartHosting={handleStartHosting}
+                onRefresh={loadWorkers}
               />
             )}
 
@@ -156,6 +396,8 @@ function App() {
                 jobName={currentJob.name}
                 logs={executionLogs}
                 elapsedTime={elapsedTime}
+                jobStatus={jobStatus}
+                onReturn={handleReturnToWorkerList}
               />
             )}
 
@@ -163,7 +405,7 @@ function App() {
               <JobCompleteScreen
                 worker={selectedWorker}
                 jobName={currentJob.name}
-                result={mockJobResult}
+                result={jobResult}
                 onReturn={handleReturnToWorkerList}
               />
             )}

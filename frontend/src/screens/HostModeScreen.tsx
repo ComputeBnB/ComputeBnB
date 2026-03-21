@@ -1,11 +1,27 @@
 import React from 'react';
-import { Server, Wifi, Monitor, X } from 'lucide-react';
+import { Server, Wifi, Monitor, X, Check, XCircle, Code, Clock, User } from 'lucide-react';
+import { HostingRequest } from '../types';
 
 interface HostModeScreenProps {
   onStopHosting: () => void;
+  requests: HostingRequest[];
+  onApprove: (requestId: string) => void;
+  onDeny: (requestId: string) => void;
+  hostIp: string | null;
 }
 
-export const HostModeScreen: React.FC<HostModeScreenProps> = ({ onStopHosting }) => {
+export const HostModeScreen: React.FC<HostModeScreenProps> = ({
+  onStopHosting,
+  requests,
+  onApprove,
+  onDeny,
+  hostIp,
+}) => {
+  const formatTime = (isoString: string) => {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {/* Header */}
@@ -26,31 +42,33 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({ onStopHosting })
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto flex items-center justify-center p-8">
-        <div className="max-w-2xl w-full">
-          <div className="bg-app-surface border border-app-border rounded-xl p-8">
-            {/* Status Indicator */}
-            <div className="flex flex-col items-center text-center mb-8">
-              <div className="relative mb-6">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-app-accent to-blue-600 flex items-center justify-center">
-                  <Server size={40} className="text-white" />
+      <div className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-3xl mx-auto space-y-6">
+          {/* Status Card */}
+          <div className="bg-app-surface border border-app-border rounded-xl p-6">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-app-accent to-blue-600 flex items-center justify-center">
+                  <Server size={28} className="text-white" />
                 </div>
-                <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-app-surface flex items-center justify-center animate-pulse">
-                  <div className="w-3 h-3 bg-white rounded-full" />
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-3 border-app-surface flex items-center justify-center animate-pulse">
+                  <div className="w-2.5 h-2.5 bg-white rounded-full" />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold text-app-text mb-2">Waiting for Connection</h2>
-              <p className="text-sm text-app-text-secondary max-w-md">
-                Your computer is now discoverable on the local network. Other users can connect and submit jobs to run on your machine.
-              </p>
+              <div>
+                <h2 className="text-lg font-bold text-app-text">Hosting Active</h2>
+                <p className="text-sm text-app-text-secondary">
+                  Discoverable on the local network
+                </p>
+              </div>
             </div>
 
             {/* Connection Info */}
-            <div className="space-y-4 mb-6">
-              <div className="flex items-center gap-3 p-4 bg-app-surface-elevated rounded-lg border border-app-border">
-                <Wifi size={20} className="text-app-accent" />
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 bg-app-surface-elevated rounded-lg border border-app-border">
+                <Wifi size={18} className="text-app-accent" />
                 <div className="flex-1">
-                  <div className="text-xs text-app-text-tertiary mb-1">Network Status</div>
+                  <div className="text-xs text-app-text-tertiary">Network Status</div>
                   <div className="text-sm font-medium text-app-text">Connected & Discoverable</div>
                 </div>
                 <div className="px-2 py-1 rounded bg-green-500/10 border border-green-500/30">
@@ -58,40 +76,121 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({ onStopHosting })
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 p-4 bg-app-surface-elevated rounded-lg border border-app-border">
-                <Monitor size={20} className="text-app-accent" />
-                <div className="flex-1">
-                  <div className="text-xs text-app-text-tertiary mb-1">Your Computer</div>
-                  <div className="text-sm font-medium text-app-text">{getComputerName()}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Info Box */}
-            <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
-              <div className="flex gap-3">
-                <div className="flex-shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <span className="text-blue-400 text-sm">ℹ</span>
+              {hostIp && (
+                <div className="flex items-center gap-3 p-3 bg-app-surface-elevated rounded-lg border border-app-border">
+                  <Monitor size={18} className="text-app-accent" />
+                  <div className="flex-1">
+                    <div className="text-xs text-app-text-tertiary">Your IP Address</div>
+                    <div className="text-sm font-medium text-app-text font-mono">{hostIp}:8000</div>
                   </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-app-text mb-1">While Hosting</h3>
-                  <ul className="text-xs text-app-text-secondary space-y-1">
-                    <li>• You cannot use guest mode to run jobs on other computers</li>
-                    <li>• Your computer resources will be available to trusted users</li>
-                    <li>• Click "Stop Hosting" anytime to return to guest mode</li>
-                  </ul>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
-          {/* Activity Log (placeholder for future) */}
-          <div className="mt-6 bg-app-surface border border-app-border rounded-xl p-6">
-            <h3 className="text-sm font-semibold text-app-text mb-3">Recent Activity</h3>
-            <div className="text-center py-8">
-              <p className="text-sm text-app-text-tertiary">No connections yet</p>
+          {/* Pending Requests */}
+          <div className="bg-app-surface border border-app-border rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide">
+                Incoming Requests
+                {requests.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full bg-app-accent/10 text-app-accent text-xs font-medium">
+                    {requests.length}
+                  </span>
+                )}
+              </h3>
+            </div>
+
+            {requests.length === 0 ? (
+              <div className="text-center py-12">
+                <Server size={32} className="mx-auto text-app-text-tertiary mb-3" />
+                <p className="text-sm text-app-text-tertiary">No pending requests</p>
+                <p className="text-xs text-app-text-tertiary mt-1">
+                  Requests from other computers will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {requests.map((req) => (
+                  <div
+                    key={req.request_id}
+                    className="p-4 bg-app-surface-elevated rounded-lg border border-app-border"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-app-accent/10 flex items-center justify-center">
+                          <User size={16} className="text-app-accent" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-app-text">
+                            {req.guest_name}
+                          </div>
+                          <div className="text-xs text-app-text-tertiary">
+                            {req.guest_ip}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-app-text-tertiary">
+                        <Clock size={12} />
+                        <span>{formatTime(req.created_at)}</span>
+                      </div>
+                    </div>
+
+                    {/* Code Preview */}
+                    <div className="mb-3 p-3 bg-app-bg rounded-md border border-app-border/50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Code size={12} className="text-app-text-tertiary" />
+                        <span className="text-xs text-app-text-tertiary font-medium">
+                          {req.filename}
+                        </span>
+                        <span className="text-xs text-app-text-tertiary">
+                          · timeout {req.timeout_secs}s
+                        </span>
+                      </div>
+                      <pre className="text-xs text-app-text-secondary font-mono whitespace-pre-wrap break-all leading-relaxed">
+                        {req.code_preview}
+                      </pre>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 justify-end">
+                      <button
+                        onClick={() => onDeny(req.request_id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-all"
+                      >
+                        <XCircle size={14} />
+                        Deny
+                      </button>
+                      <button
+                        onClick={() => onApprove(req.request_id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 hover:text-green-300 transition-all"
+                      >
+                        <Check size={14} />
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Info Box */}
+          <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
+            <div className="flex gap-3">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <span className="text-blue-400 text-sm">i</span>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-app-text mb-1">While Hosting</h3>
+                <ul className="text-xs text-app-text-secondary space-y-1">
+                  <li>· You cannot use guest mode to run jobs on other computers</li>
+                  <li>· Review each request before approving — check the code preview</li>
+                  <li>· Click "Stop Hosting" anytime to return to guest mode</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -99,7 +198,3 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({ onStopHosting })
     </div>
   );
 };
-
-function getComputerName(): string {
-  return window.navigator.platform || 'Unknown Computer';
-}

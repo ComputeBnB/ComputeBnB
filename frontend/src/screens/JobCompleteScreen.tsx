@@ -1,12 +1,12 @@
 import React from 'react';
-import { CheckCircle2, Server, Clock, ArrowLeft, Download } from 'lucide-react';
+import { CheckCircle2, XCircle, Server, Clock, ArrowLeft, Terminal } from 'lucide-react';
 import { Worker, JobResult } from '../types';
-import { ResultCard } from '../components/ResultCard';
+import { LogViewer } from '../components/LogViewer';
 
 interface JobCompleteScreenProps {
   worker: Worker;
   jobName: string;
-  result: JobResult;
+  result: JobResult | null;
   onReturn: () => void;
 }
 
@@ -16,7 +16,10 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
   result,
   onReturn,
 }) => {
+  const isSuccess = result?.exitCode === 0;
+
   const formatRuntime = (seconds: number) => {
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const mins = Math.floor(seconds / 60);
     const secs = (seconds % 60).toFixed(1);
     return `${mins}m ${secs}s`;
@@ -27,12 +30,22 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
       {/* Header */}
       <div className="px-8 py-6 border-b border-app-border">
         <div className="flex items-center justify-center mb-6">
-          <div className="p-4 rounded-full bg-app-success/10 border-2 border-app-success/30">
-            <CheckCircle2 size={48} className="text-app-success" />
+          <div className={`p-4 rounded-full border-2 ${
+            isSuccess
+              ? 'bg-app-success/10 border-app-success/30'
+              : 'bg-red-500/10 border-red-500/30'
+          }`}>
+            {isSuccess ? (
+              <CheckCircle2 size={48} className="text-app-success" />
+            ) : (
+              <XCircle size={48} className="text-red-400" />
+            )}
           </div>
         </div>
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-app-text mb-2">Job Completed Successfully</h1>
+          <h1 className="text-2xl font-bold text-app-text mb-2">
+            {isSuccess ? 'Job Completed Successfully' : 'Job Failed'}
+          </h1>
           <p className="text-sm text-app-text-secondary">{jobName}</p>
         </div>
       </div>
@@ -41,7 +54,7 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
       <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
         <div className="max-w-4xl mx-auto space-y-6">
           {/* Summary Cards */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-app-surface border border-app-border">
               <div className="flex items-center gap-2 mb-2">
                 <Server size={16} className="text-app-text-tertiary" />
@@ -51,7 +64,7 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
               </div>
               <div className="text-base font-semibold text-app-text">{worker.name}</div>
               <div className="text-xs text-app-text-tertiary mt-1">
-                {worker.specs.cpu} • {worker.specs.cpuCores} cores
+                {worker.host}:{worker.port}
               </div>
             </div>
 
@@ -63,38 +76,37 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
                 </span>
               </div>
               <div className="text-2xl font-bold text-app-text font-mono">
-                {formatRuntime(result.runtime)}
+                {result ? formatRuntime(result.runtime) : '--'}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-lg bg-app-surface border border-app-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Terminal size={16} className="text-app-text-tertiary" />
+                <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
+                  Exit Code
+                </span>
+              </div>
+              <div className={`text-2xl font-bold font-mono ${
+                isSuccess ? 'text-app-success' : 'text-red-400'
+              }`}>
+                {result?.exitCode ?? '--'}
               </div>
             </div>
           </div>
 
-          {/* Result Summary */}
-          <div className="p-5 rounded-lg bg-gradient-to-br from-app-success/5 to-app-success/10 border border-app-success/20">
-            <h3 className="text-sm font-semibold text-app-text mb-3 uppercase tracking-wide">
-              Result Summary
-            </h3>
-            <p className="text-sm text-app-text-secondary leading-relaxed">
-              {result.summary}
-            </p>
-          </div>
-
-          {/* Output Files */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide">
-                Output Files ({result.outputFiles.length})
+          {/* Output */}
+          {result?.output && (
+            <div>
+              <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide mb-3">
+                Output
               </h3>
-              <button className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-app-text-secondary hover:text-app-text border border-app-border hover:bg-app-surface-elevated transition-all">
-                <Download size={14} />
-                <span>Download All</span>
-              </button>
+              <LogViewer
+                logs={result.output.split('\n').filter((l) => l)}
+                title="Program Output"
+              />
             </div>
-            <div className="space-y-2">
-              {result.outputFiles.map((file, index) => (
-                <ResultCard key={index} file={file} />
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="flex justify-center pt-6">
