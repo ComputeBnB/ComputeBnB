@@ -29,6 +29,19 @@ DISCOVERY_PATH = os.path.join(BACKEND_PATH, "services", "discovery.py")
 hosting_mod = import_backend_module(HOSTING_PATH, "hosting")
 discovery_mod = import_backend_module(DISCOVERY_PATH, "discovery")
 
+
+def _host_snapshot(hosts):
+    return [
+        (host.worker_id, host.display_name, host.host, host.port, host.status.value)
+        for host in sorted(hosts, key=lambda item: (item.display_name, item.host, item.port))
+    ]
+
+
+def _print_hosts(hosts):
+    print("[Guest] Found hosts:")
+    for idx, host in enumerate(hosts):
+        print(f"  [{idx}] {host.display_name} ({host.host}:{host.port}) - {host.status.value}")
+
 async def run_host():
     print("[Host] Starting hosting service...")
     result = await hosting_mod.hosting_service.start_hosting()
@@ -52,17 +65,35 @@ async def run_guest():
     print("[Guest] Discovering hosts...")
     discovery_mod.discovery_service.start()
     try:
-        await asyncio.sleep(2)
-        hosts = list(discovery_mod.discovery_service.get_workers().values())
+        hosts = []
+        last_snapshot = None
+        stable_polls = 0
+
+        while True:
+            hosts = list(discovery_mod.discovery_service.get_workers().values())
+            snapshot = _host_snapshot(hosts)
+
+            if snapshot != last_snapshot:
+                stable_polls = 0
+                if hosts:
+                    _print_hosts(hosts)
+                else:
+                    print("[Guest] No hosts found yet. Waiting for advertisements...")
+                last_snapshot = snapshot
+            else:
+                stable_polls += 1
+
+            if hosts and stable_polls >= 2:
+                break
+
+            await asyncio.sleep(1)
     finally:
         discovery_mod.discovery_service.stop()
 
     if not hosts:
         print("[Guest] No hosts found.")
         return
-    print("[Guest] Found hosts:")
-    for idx, host in enumerate(hosts):
-        print(f"  [{idx}] {host.display_name} ({host.host}:{host.port})")
+
     choice = input("Select host to send job to (number): ")
     try:
         idx = int(choice)
