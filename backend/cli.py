@@ -105,25 +105,32 @@ async def run_guest():
         print("Invalid selection.")
         return
 
-    file_path = input("Enter path to Python file to run on host: ").strip()
-    if not os.path.isfile(file_path):
-        print(f"File not found: {file_path}")
-        return
-    with open(file_path, "r", encoding="utf-8") as f:
-        code = f.read()
-    filename = os.path.basename(file_path)
-
-    # Send job request (simplified, assumes direct API call)
     import requests
-    req = {
-        "code": code,
-        "filename": filename,
-        "guest_name": platform.node(),
-    }
+    import zipfile
+    import tempfile
+
+    folder_path = input("Enter path to folder to zip and run on host: ").strip()
+    if not os.path.isdir(folder_path):
+        print(f"Folder not found: {folder_path}")
+        return
+
+    # Zip the folder to a temp file
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
+        with zipfile.ZipFile(tmp_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(folder_path):
+                for file in files:
+                    abs_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(abs_path, folder_path)
+                    zipf.write(abs_path, rel_path)
+        zip_path = tmp_zip.name
+
     url = f"http://{host.host}:{host.port}/jobs/request"
-    print(f"[Guest] Sending job to {url}...")
-    resp = requests.post(url, json=req)
-    print(f"[Guest] Response: {resp.json()}")
+    print(f"[Guest] Sending zip to {url}...")
+    with open(zip_path, "rb") as f:
+        files = {"file": (os.path.basename(zip_path), f, "application/zip")}
+        data = {"guest_name": platform.node(), "timeout_secs": 300}
+        resp = requests.post(url, files=files, data=data)
+    print(f"[Guest] Response: {resp.json()}" if resp.headers.get('content-type','').startswith('application/json') else resp.text)
 
 if __name__ == "__main__":
     print("Select mode:")

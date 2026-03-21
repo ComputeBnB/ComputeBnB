@@ -104,8 +104,8 @@ class HostingService:
     # ── Request management ──────────────────────────────────────────
 
     def create_request(
-        self, guest_name: str, guest_ip: str, code: str,
-        filename: str = "main.py", timeout_secs: int = 300,
+        self, guest_name: str, guest_ip: str, code: Optional[str] = None,
+        filename: str = "main.py", timeout_secs: int = 300, file_content: Optional[bytes] = None
     ) -> JobRequest:
         """Create a pending job request from a guest."""
         request_id = f"req-{uuid.uuid4().hex[:8]}"
@@ -118,6 +118,7 @@ class HostingService:
             timeout_secs=timeout_secs,
             status=RequestStatus.PENDING,
             created_at=datetime.now(),
+            file_content=file_content,
         )
         self.pending_requests[request_id] = request
         return request
