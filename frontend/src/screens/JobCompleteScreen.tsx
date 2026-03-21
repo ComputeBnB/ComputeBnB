@@ -8,6 +8,8 @@ import {
   Terminal,
   FileOutput,
   Download,
+  DollarSign,
+  Loader2,
 } from 'lucide-react';
 import { Worker, JobResult, ProjectFileUpload } from '../types';
 import { LogViewer } from '../components/LogViewer';
@@ -70,6 +72,8 @@ interface JobCompleteScreenProps {
   worker: Worker;
   jobName: string;
   result: JobResult | null;
+  isPaying: boolean;
+  onPay: () => void;
   onReturn: () => void;
 }
 
@@ -77,6 +81,8 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
   worker,
   jobName,
   result,
+  isPaying,
+  onPay,
   onReturn,
 }) => {
   const isSuccess = result?.exitCode === 0;
@@ -98,6 +104,8 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
     const secs = (seconds % 60).toFixed(1);
     return `${mins}m ${secs}s`;
   };
+
+  const formatUsd = (amount: number) => `$${amount.toFixed(2)}`;
 
   const handleSaveFiles = async () => {
     if (!generatedFiles.length) return;
@@ -164,7 +172,7 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
       <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
         <div className="max-w-4xl mx-auto space-y-6">
           {/* Summary Cards */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className={`grid gap-4 ${result?.chargeEnabled ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <div className="p-4 rounded-lg bg-app-surface border border-app-border">
               <div className="flex items-center gap-2 mb-2">
                 <Server size={16} className="text-app-text-tertiary" />
@@ -203,7 +211,62 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
                 {result?.exitCode ?? '--'}
               </div>
             </div>
+
+            {result?.chargeEnabled && (
+              <div className="p-4 rounded-lg bg-app-surface border border-emerald-500/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <DollarSign size={16} className="text-emerald-400" />
+                  <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
+                    Amount To Pay
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-app-text font-mono">
+                  {formatUsd(result.balanceDueUsd)}
+                </div>
+                <div className="text-xs text-app-text-tertiary mt-1">
+                  {result.paid
+                    ? `Paid · total compute ${formatUsd(result.totalChargeUsd)}`
+                    : `${formatUsd(result.chargeRateUsdPerHour)}/hr host rate · $0.25 minimum`}
+                </div>
+              </div>
+            )}
           </div>
+
+          {result?.chargeEnabled && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide">
+                    Demo Payment
+                  </h3>
+                  <p className="mt-1 text-sm text-app-text-secondary">
+                    {result.paid
+                      ? `Payment sent to the host. Amount due is now ${formatUsd(result.balanceDueUsd)}.`
+                      : `You should pay ${formatUsd(result.balanceDueUsd)} for this run. This is a fake payment flow for the demo only.`}
+                  </p>
+                  {!result.paid && (
+                    <p className="mt-1 text-xs text-app-text-tertiary">
+                      Rate: {formatUsd(result.chargeRateUsdPerHour)}/hr with a $0.25 minimum demo charge.
+                    </p>
+                  )}
+                </div>
+                {!result.paid ? (
+                  <button
+                    onClick={onPay}
+                    disabled={isPaying}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPaying ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
+                    <span>{isPaying ? 'Sending payment...' : `Pay ${formatUsd(result.balanceDueUsd)}`}</span>
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-green-500/20 bg-green-500/10 px-4 py-2 text-sm font-medium text-green-400">
+                    Payment received
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Output */}
           {result?.output && (

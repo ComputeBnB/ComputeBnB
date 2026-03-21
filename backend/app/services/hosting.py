@@ -25,6 +25,7 @@ SERVICE_TYPE = "_compute-worker._tcp.local."
 FASTAPI_PORT = 8000
 TOKEN_EXPIRY_MINUTES = 5
 DEFAULT_CHARGE_USD_PER_HOUR = 18.0
+MINIMUM_CHARGE_USD = 0.25
 IGNORED_OUTPUT_SEGMENTS = {".computebnb_deps", "__pycache__", ".pytest_cache", ".mypy_cache"}
 MAX_RETURNED_FILE_BYTES = 2 * 1024 * 1024
 MAX_RETURNED_FILE_COUNT = 25
@@ -256,7 +257,9 @@ class HostingService:
     def _compute_charge_usd(self, elapsed_seconds: float, rate_usd_per_hour: float) -> float:
         if rate_usd_per_hour <= 0:
             return 0.0
-        return self._round_currency((elapsed_seconds / 3600) * rate_usd_per_hour)
+
+        usage_charge = (elapsed_seconds / 3600) * rate_usd_per_hour
+        return self._round_currency(max(MINIMUM_CHARGE_USD, usage_charge))
 
     def _payment_status(self, charge_enabled: bool, paid: bool, balance_due_usd: float) -> str:
         if not charge_enabled:

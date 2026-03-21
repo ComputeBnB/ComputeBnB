@@ -29,6 +29,8 @@ export interface ProjectUpload {
   files: ProjectFileUpload[];
 }
 
+export type PaymentStatus = "not_required" | "payment_due" | "paid";
+
 export interface Job {
   id: string;
   name: string;
@@ -40,6 +42,12 @@ export interface Job {
   projectFileCount?: number;
   hasRequirementsTxt?: boolean;
   projectFiles?: ProjectFileUpload[];
+  chargeEnabled?: boolean;
+  chargeRateUsdPerHour?: number;
+  totalChargeUsd?: number;
+  balanceDueUsd?: number;
+  paid?: boolean;
+  paymentStatus?: PaymentStatus;
   requestId: string;
   timeoutSecs: number;
   status: "pending" | "running" | "completed" | "failed";
@@ -56,6 +64,12 @@ export interface JobResult {
   runtime: number;
   output: string;
   generatedFiles: ProjectFileUpload[];
+  chargeEnabled: boolean;
+  chargeRateUsdPerHour: number;
+  totalChargeUsd: number;
+  balanceDueUsd: number;
+  paid: boolean;
+  paymentStatus: PaymentStatus;
 }
 
 export interface HostingRequest {
@@ -88,6 +102,14 @@ export interface ActiveJob {
   status_detail?: string | null;
   runtime?: string;
   started_at?: string;
+  charge_enabled?: boolean;
+  charge_rate_usd_per_hour?: number;
+  total_charge_usd?: number;
+  balance_due_usd?: number;
+  paid?: boolean;
+  payment_status?: PaymentStatus;
+  payment_received_at?: string;
+  completed_at?: string;
   logs?: { type: string; data: string }[];
 }
 

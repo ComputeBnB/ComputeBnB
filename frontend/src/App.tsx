@@ -21,6 +21,7 @@ import {
   fetchActiveJob,
   approveRequest,
   denyRequest,
+  payForJob,
   submitJob,
   pollJobStatus,
   createJobWebSocket,
@@ -30,6 +31,19 @@ import { SubmitJobScreen } from "./screens/SubmitJobScreen";
 import { JobExecutionScreen } from "./screens/JobExecutionScreen";
 import { JobCompleteScreen } from "./screens/JobCompleteScreen";
 import { HostModeScreen } from "./screens/HostModeScreen";
+
+const MINIMUM_DEMO_CHARGE_USD = 0.25;
+
+function computeDemoCharge(
+  chargeEnabled: boolean,
+  chargeRateUsdPerHour: number,
+  elapsedTime: number,
+): number {
+  if (!chargeEnabled || chargeRateUsdPerHour <= 0) return 0;
+
+  const usageCharge = (chargeRateUsdPerHour * elapsedTime) / 3600;
+  return Number(Math.max(MINIMUM_DEMO_CHARGE_USD, usageCharge).toFixed(2));
+}
 
 function App() {
   const [mode, setMode] = useState<AppMode>("guest");
@@ -46,6 +60,7 @@ function App() {
   const [jobPhase, setJobPhase] = useState<string>("pending_approval");
   const [jobPhaseDetail, setJobPhaseDetail] = useState<string | null>(null);
   const [jobResult, setJobResult] = useState<JobResult | null>(null);
+  const [isPayingForJob, setIsPayingForJob] = useState(false);
 
   // Local machine info
   const [localSpecs, setLocalSpecs] = useState<
@@ -157,6 +172,12 @@ function App() {
         projectFileCount: jobData.projectFiles?.length,
         hasRequirementsTxt: jobData.hasRequirementsTxt,
         projectFiles: jobData.projectFiles,
+        chargeEnabled: false,
+        chargeRateUsdPerHour: 0,
+        totalChargeUsd: 0,
+        balanceDueUsd: 0,
+        paid: false,
+        paymentStatus: "not_required",
         requestId: result.request_id,
         timeoutSecs: jobData.timeoutSecs,
         status: "pending",
@@ -172,6 +193,7 @@ function App() {
       setJobPhase("pending_approval");
       setJobPhaseDetail("Waiting for the host to approve your project upload.");
       setJobResult(null);
+      setIsPayingForJob(false);
       setStage("execution");
 
       // Start polling for approval
@@ -192,10 +214,32 @@ function App() {
         if (status.status === "accepted" && status.token) {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
+          const chargeEnabled = status.charge_enabled ?? false;
+          const chargeRateUsdPerHour = status.charge_rate_usd_per_hour ?? 0;
           setJobStatus("approved");
           setJobPhase("approved");
-          setJobPhaseDetail("Host approved the job. Connecting to the Docker runtime.");
-          connectWebSocket(worker, requestId, status.token);
+          setJobPhaseDetail(
+            chargeEnabled
+              ? `Host approved the job. Compute is billable at $${chargeRateUsdPerHour.toFixed(2)}/hr.`
+              : "Host approved the job. Connecting to the Docker runtime.",
+          );
+          setCurrentJob((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  chargeEnabled,
+                  chargeRateUsdPerHour,
+                  paymentStatus: chargeEnabled ? "payment_due" : "not_required",
+                }
+              : prev,
+          );
+          connectWebSocket(
+            worker,
+            requestId,
+            status.token,
+            chargeEnabled,
+            chargeRateUsdPerHour,
+          );
         } else if (status.status === "denied") {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
@@ -213,6 +257,8 @@ function App() {
     worker: Worker,
     requestId: string,
     token: string,
+    chargeEnabled: boolean,
+    chargeRateUsdPerHour: number,
   ) => {
     const ws = createJobWebSocket(worker, requestId, token);
     wsRef.current = ws;
@@ -282,7 +328,34 @@ function App() {
             runtime: msg.duration_ms / 1000,
             output: collectedOutput.join(""),
             generatedFiles: [...collectedGeneratedFiles],
+            chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+            chargeRateUsdPerHour:
+              msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
+            totalChargeUsd: msg.total_charge_usd ?? 0,
+            balanceDueUsd: msg.balance_due_usd ?? 0,
+            paid: msg.paid ?? false,
+            paymentStatus:
+              msg.payment_status ??
+              ((msg.charge_enabled ?? chargeEnabled) ? "payment_due" : "not_required"),
           });
+          setCurrentJob((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+                  chargeRateUsdPerHour:
+                    msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
+                  totalChargeUsd: msg.total_charge_usd ?? 0,
+                  balanceDueUsd: msg.balance_due_usd ?? 0,
+                  paid: msg.paid ?? false,
+                  paymentStatus:
+                    msg.payment_status ??
+                    ((msg.charge_enabled ?? chargeEnabled)
+                      ? "payment_due"
+                      : "not_required"),
+                }
+              : prev,
+          );
           // Small delay so user sees the final log before transitioning
           setTimeout(() => setStage("complete"), 1000);
           break;
@@ -298,7 +371,34 @@ function App() {
             runtime: elapsedTime,
             output: collectedOutput.join(""),
             generatedFiles: [...collectedGeneratedFiles],
+            chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+            chargeRateUsdPerHour:
+              msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
+            totalChargeUsd: msg.total_charge_usd ?? 0,
+            balanceDueUsd: msg.balance_due_usd ?? 0,
+            paid: msg.paid ?? false,
+            paymentStatus:
+              msg.payment_status ??
+              ((msg.charge_enabled ?? chargeEnabled) ? "payment_due" : "not_required"),
           });
+          setCurrentJob((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  chargeEnabled: msg.charge_enabled ?? chargeEnabled,
+                  chargeRateUsdPerHour:
+                    msg.charge_rate_usd_per_hour ?? chargeRateUsdPerHour,
+                  totalChargeUsd: msg.total_charge_usd ?? 0,
+                  balanceDueUsd: msg.balance_due_usd ?? 0,
+                  paid: msg.paid ?? false,
+                  paymentStatus:
+                    msg.payment_status ??
+                    ((msg.charge_enabled ?? chargeEnabled)
+                      ? "payment_due"
+                      : "not_required"),
+                }
+              : prev,
+          );
           setTimeout(() => setStage("complete"), 1500);
           break;
       }
@@ -344,6 +444,7 @@ function App() {
     setJobPhase("pending_approval");
     setJobPhaseDetail(null);
     setJobResult(null);
+    setIsPayingForJob(false);
   };
 
   // ── Host Mode ─────────────────────────────────────────────────────
@@ -394,9 +495,12 @@ function App() {
     setStage("discover");
   };
 
-  const handleApproveRequest = async (requestId: string) => {
+  const handleApproveRequest = async (
+    requestId: string,
+    chargeEnabled = false,
+  ) => {
     try {
-      await approveRequest(requestId);
+      await approveRequest(requestId, chargeEnabled);
       setHostingRequests((prev) =>
         prev.filter((r) => r.request_id !== requestId),
       );
@@ -413,6 +517,46 @@ function App() {
       );
     } catch (err) {
       console.error("Failed to deny:", err);
+    }
+  };
+
+  const handlePayForJob = async () => {
+    if (!selectedWorker || !currentJob || !jobResult || !jobResult.chargeEnabled || jobResult.paid) {
+      return;
+    }
+
+    try {
+      setIsPayingForJob(true);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const payment = await payForJob(selectedWorker, currentJob.requestId);
+
+      setJobResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              paid: payment.paid,
+              balanceDueUsd: payment.balance_due_usd,
+              totalChargeUsd: payment.total_charge_usd ?? prev.totalChargeUsd,
+              paymentStatus: payment.payment_status,
+            }
+          : prev,
+      );
+      setCurrentJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              paid: payment.paid,
+              balanceDueUsd: payment.balance_due_usd,
+              totalChargeUsd: payment.total_charge_usd ?? prev.totalChargeUsd,
+              paymentStatus: payment.payment_status,
+            }
+          : prev,
+      );
+    } catch (err) {
+      console.error("Failed to pay for job:", err);
+      alert("Failed to complete the demo payment.");
+    } finally {
+      setIsPayingForJob(false);
     }
   };
 
@@ -453,10 +597,10 @@ function App() {
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden">
         {mode === "host" ? (
-          <HostModeScreen
-            onStopHosting={handleStopHosting}
-            requests={hostingRequests}
-            onApprove={handleApproveRequest}
+              <HostModeScreen
+                onStopHosting={handleStopHosting}
+                requests={hostingRequests}
+                onApprove={handleApproveRequest}
             onDeny={handleDenyRequest}
             hostIp={hostIp}
             activeJob={activeJob}
@@ -491,6 +635,13 @@ function App() {
                 jobStatus={jobStatus}
                 phase={jobPhase}
                 phaseDetail={jobPhaseDetail}
+                chargeEnabled={currentJob.chargeEnabled ?? false}
+                chargeRateUsdPerHour={currentJob.chargeRateUsdPerHour ?? 0}
+                currentChargeUsd={computeDemoCharge(
+                  currentJob.chargeEnabled ?? false,
+                  currentJob.chargeRateUsdPerHour ?? 0,
+                  elapsedTime,
+                )}
                 onReturn={handleReturnToWorkerList}
               />
             )}
@@ -500,6 +651,8 @@ function App() {
                 worker={selectedWorker}
                 jobName={currentJob.name}
                 result={jobResult}
+                isPaying={isPayingForJob}
+                onPay={handlePayForJob}
                 onReturn={handleReturnToWorkerList}
               />
             )}

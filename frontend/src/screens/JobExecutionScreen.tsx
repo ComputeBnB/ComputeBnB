@@ -1,5 +1,5 @@
 import React from 'react';
-import { Server, Clock, Loader2, XCircle, ArrowLeft } from 'lucide-react';
+import { Server, Clock, Loader2, XCircle, ArrowLeft, DollarSign } from 'lucide-react';
 import { Worker, JobStatus } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { LogViewer } from '../components/LogViewer';
@@ -12,6 +12,9 @@ interface JobExecutionScreenProps {
   jobStatus: JobStatus;
   phase: string;
   phaseDetail: string | null;
+  chargeEnabled: boolean;
+  chargeRateUsdPerHour: number;
+  currentChargeUsd: number;
   onReturn: () => void;
 }
 
@@ -23,6 +26,9 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
   jobStatus,
   phase,
   phaseDetail,
+  chargeEnabled,
+  chargeRateUsdPerHour,
+  currentChargeUsd,
   onReturn,
 }) => {
   const formatTime = (seconds: number) => {
@@ -118,7 +124,7 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
         </div>
 
         {/* Job Info Cards */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid gap-4 ${chargeEnabled ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="p-4 rounded-lg bg-app-surface border border-app-border">
             <div className="flex items-center gap-2 mb-2">
               <Server size={16} className="text-app-text-tertiary" />
@@ -158,6 +164,26 @@ export const JobExecutionScreen: React.FC<JobExecutionScreenProps> = ({
               <div className="text-xs text-app-text-tertiary mt-1">{phaseDetail}</div>
             )}
           </div>
+
+          {chargeEnabled && (
+            <div className="p-4 rounded-lg bg-app-surface border border-emerald-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <DollarSign size={16} className="text-emerald-400" />
+                <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
+                  Compute Charge
+                </span>
+              </div>
+              <div className="text-2xl font-bold text-app-text font-mono">
+                ${currentChargeUsd.toFixed(2)}
+              </div>
+              <div className="text-xs text-app-text-tertiary mt-1">
+                ${chargeRateUsdPerHour.toFixed(2)}/hr billed by the host
+              </div>
+              <div className="text-xs text-app-text-tertiary mt-1">
+                Includes a $0.25 minimum demo charge
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

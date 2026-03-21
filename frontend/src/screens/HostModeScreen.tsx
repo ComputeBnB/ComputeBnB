@@ -1,11 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { Server, Wifi, Monitor, X, Check, XCircle, Code, Clock, User, Play } from 'lucide-react';
+import { Server, Wifi, Monitor, X, Check, XCircle, Code, Clock, User, Play, DollarSign } from 'lucide-react';
 import { HostingRequest, ActiveJob } from '../types';
 
 interface HostModeScreenProps {
   onStopHosting: () => void;
   requests: HostingRequest[];
-  onApprove: (requestId: string) => void;
+  onApprove: (requestId: string, chargeEnabled?: boolean) => void;
   onDeny: (requestId: string) => void;
   hostIp: string | null;
   activeJob: ActiveJob | null;
@@ -31,7 +31,9 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeJob?.logs?.length]);
 
-  const isJobRunning = activeJob?.active && activeJob.state !== 'done';
+  const isJobRunning = !!activeJob?.active && !['done', 'failed', 'timeout', 'cancelled'].includes(activeJob.state || '');
+
+  const formatUsd = (amount?: number) => `$${(amount ?? 0).toFixed(2)}`;
 
   return (
     <div className="h-full flex flex-col animate-fade-in">
@@ -117,9 +119,9 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                       Running
                     </span>
                   )}
-                  {activeJob.state === 'done' && (
+                  {!isJobRunning && activeJob.state && (
                     <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">
-                      Done
+                      {activeJob.payment_status === 'paid' ? 'Payment Received' : activeJob.state}
                     </span>
                   )}
                 </h3>
@@ -148,6 +150,47 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
               {activeJob.status_detail && (
                 <div className="mb-4 p-3 bg-app-bg rounded-md border border-app-border/50 text-xs text-app-text-secondary">
                   {activeJob.status_detail}
+                </div>
+              )}
+
+              {activeJob.charge_enabled && (
+                <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-app-text-secondary">
+                      <DollarSign size={12} className="text-emerald-400" />
+                      Compute Value
+                    </div>
+                    <div className="mt-2 text-2xl font-bold font-mono text-app-text">
+                      {formatUsd(activeJob.total_charge_usd)}
+                    </div>
+                    <div className="mt-1 text-xs text-app-text-tertiary">
+                      {formatUsd(activeJob.charge_rate_usd_per_hour)}/hr rate · $0.25 minimum
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-app-border bg-app-bg p-3">
+                    <div className="text-xs uppercase tracking-wide text-app-text-secondary">
+                      Balance Due
+                    </div>
+                    <div className="mt-2 text-2xl font-bold font-mono text-app-text">
+                      {formatUsd(activeJob.balance_due_usd)}
+                    </div>
+                    <div className="mt-1 text-xs text-app-text-tertiary">
+                      {activeJob.payment_status === 'paid' ? 'Settled' : 'Awaiting guest payment'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-app-border bg-app-bg p-3">
+                    <div className="text-xs uppercase tracking-wide text-app-text-secondary">
+                      Payment Status
+                    </div>
+                    <div className={`mt-2 text-sm font-semibold ${activeJob.payment_status === 'paid' ? 'text-green-400' : 'text-yellow-300'}`}>
+                      {activeJob.payment_status === 'paid' ? 'Payment received' : 'Payment pending'}
+                    </div>
+                    <div className="mt-1 text-xs text-app-text-tertiary">
+                      {activeJob.payment_received_at
+                        ? `Received at ${formatTime(activeJob.payment_received_at)}`
+                        : 'Guest can pay after the run completes'}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -294,12 +337,22 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                         Deny
                       </button>
                       <button
-                        onClick={() => onApprove(req.request_id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 hover:text-green-300 transition-all"
+                        onClick={() => onApprove(req.request_id, false)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-app-border hover:bg-app-bg text-app-text-secondary hover:text-app-text transition-all"
                       >
                         <Check size={14} />
-                        Approve
+                        Approve Free
                       </button>
+                      <button
+                        onClick={() => onApprove(req.request_id, true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 hover:text-green-300 transition-all"
+                      >
+                        <DollarSign size={14} />
+                        Approve + Charge
+                      </button>
+                    </div>
+                    <div className="mt-2 text-right text-xs text-app-text-tertiary">
+                      Billable jobs charge the guest $18.00/hr with a $0.25 minimum and expose a fake pay button after completion.
                     </div>
                   </div>
                 ))}

@@ -124,10 +124,21 @@ export async function fetchHostingRequests(): Promise<HostingRequest[]> {
 
 export async function approveRequest(
   requestId: string,
-): Promise<{ request_id: string; status: string; token: string }> {
+  chargeEnabled = false,
+): Promise<{
+  request_id: string;
+  status: string;
+  token: string;
+  charge_enabled: boolean;
+  charge_rate_usd_per_hour: number;
+}> {
   const res = await fetch(
     `${LOCAL_API}/hosting/requests/${requestId}/approve`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ charge_enabled: chargeEnabled }),
+    },
   );
   if (!res.ok) throw new Error("Failed to approve request");
   return res.json();
@@ -180,6 +191,8 @@ export async function pollJobStatus(
 ): Promise<{
   request_id: string;
   status: "pending" | "accepted" | "denied";
+  charge_enabled?: boolean;
+  charge_rate_usd_per_hour?: number;
   token?: string;
   ws_url?: string;
 }> {
@@ -187,6 +200,24 @@ export async function pollJobStatus(
     `${workerApi(worker)}/jobs/request/${requestId}/status`,
   );
   if (!res.ok) throw new Error("Failed to poll job status");
+  return res.json();
+}
+
+export async function payForJob(
+  worker: { host: string; port: number },
+  requestId: string,
+): Promise<{
+  request_id: string;
+  status: string;
+  paid: boolean;
+  balance_due_usd: number;
+  total_charge_usd?: number;
+  payment_status: "not_required" | "payment_due" | "paid";
+}> {
+  const res = await fetch(`${workerApi(worker)}/jobs/request/${requestId}/pay`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to pay job charge");
   return res.json();
 }
 

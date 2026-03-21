@@ -327,7 +327,17 @@ Initial MVP note:
 #### Done
 
 ```json
-{ "type": "done", "exit_code": 0, "duration_ms": 820 }
+{
+  "type": "done",
+  "exit_code": 0,
+  "duration_ms": 820,
+  "charge_enabled": true,
+  "charge_rate_usd_per_hour": 18.0,
+  "total_charge_usd": 0.12,
+  "balance_due_usd": 0.12,
+  "paid": false,
+  "payment_status": "payment_due"
+}
 ```
 
 #### Generated File
@@ -342,6 +352,10 @@ Initial MVP note:
 ```
 
 Generated files are streamed back automatically after execution finishes. For the MVP, return artifacts should stay small enough to fit comfortably over the WebSocket stream.
+
+#### Optional Compute Charge
+
+Hosts can approve a request either as a free run or as a billable run. When billing is enabled, both the host and guest UI show the current compute value during execution. After completion, the guest can trigger a fake payment action that marks the balance as settled on the host.
 
 #### Error
 
@@ -359,9 +373,9 @@ Generated files are streamed back automatically after execution finishes. For th
 6. User sets a timeout
 7. Client sends the project files and entrypoint metadata to the worker
 8. Worker starts a Docker container, installs `requirements.txt` when present, and executes the entrypoint
-9. Client receives live logs, status updates, and any generated files from the workspace
+9. Client receives live logs, status updates, any generated files from the workspace, and optional compute charge information
 10. Job finishes or times out
-11. Guest can review returned files and optionally save them locally
+11. Guest can review returned files, optionally save them locally, and settle any demo compute charge
 12. Worker returns to idle
 
 ## Team Plan
