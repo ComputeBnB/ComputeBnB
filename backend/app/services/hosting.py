@@ -182,7 +182,9 @@ class HostingService:
     # ── Job execution ───────────────────────────────────────────────
 
     async def execute_job(self, request_id: str) -> AsyncGenerator[dict, None]:
-        """Execute a job and yield streaming messages (stdout, stderr, done/error)."""
+        """Execute a job and yield streaming messages (stdout, stderr, done/error). Accepts either code as string or a file upload."""
+        import tempfile
+        import os
         request = self.pending_requests.get(request_id)
         if not request:
             yield {"type": "error", "message": "Request not found"}
@@ -190,45 +192,50 @@ class HostingService:
 
         self.status = WorkerStatus.BUSY
         start_time = time.time()
-
         yield {"type": "status", "state": "starting", "job_id": request_id}
 
+        temp_dir = tempfile.TemporaryDirectory()
+        code_path = os.path.join(temp_dir.name, request.filename)
+        output_path = os.path.join(temp_dir.name, "output.txt")
         try:
-            # Run the code as a subprocess
+            # If request.code is not empty, write it to a file
+            if getattr(request, "code", None):
+                with open(code_path, "w") as f:
+                    f.write(request.code)
+            # If request has file_content, write it to a file (for future extension)
+            elif getattr(request, "file_content", None):
+                with open(code_path, "wb") as f:
+                    f.write(request.file_content)
+            else:
+                yield {"type": "error", "message": "No code or file provided", "job_id": request_id}
+                return
+
+            # Run the code as a subprocess, redirect output to output.txt
             process = await asyncio.create_subprocess_exec(
-                "python3", "-c", request.code,
+                "python3", code_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=temp_dir.name,
             )
 
             yield {"type": "status", "state": "running", "job_id": request_id}
 
-            # Stream stdout
-            async def stream_stdout():
-                while True:
-                    line = await process.stdout.readline()
-                    if not line:
-                        break
-                    yield {"type": "stdout", "data": line.decode()}
-
-            async def stream_stderr():
-                while True:
-                    line = await process.stderr.readline()
-                    if not line:
-                        break
-                    yield {"type": "stderr", "data": line.decode()}
-
-            # Read both streams concurrently
             stdout_lines = []
             stderr_lines = []
 
             async def collect_stdout():
-                async for msg in stream_stdout():
-                    stdout_lines.append(msg)
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    stdout_lines.append({"type": "stdout", "data": line.decode()})
 
             async def collect_stderr():
-                async for msg in stream_stderr():
-                    stderr_lines.append(msg)
+                while True:
+                    line = await process.stderr.readline()
+                    if not line:
+                        break
+                    stderr_lines.append({"type": "stderr", "data": line.decode()})
 
             try:
                 await asyncio.wait_for(
@@ -242,11 +249,21 @@ class HostingService:
 
             await process.wait()
 
+            # Write stdout to output.txt
+            with open(output_path, "w") as out_f:
+                for msg in stdout_lines:
+                    out_f.write(msg["data"])
+
             # Yield collected output
             for msg in stdout_lines:
                 yield msg
             for msg in stderr_lines:
                 yield msg
+
+            # Send the output file content back to the client
+            with open(output_path, "r") as out_f:
+                output_content = out_f.read()
+            yield {"type": "output_file", "filename": "output.txt", "content": output_content}
 
             duration_ms = int((time.time() - start_time) * 1000)
             yield {
@@ -260,16 +277,15 @@ class HostingService:
             yield {"type": "error", "message": str(e), "job_id": request_id}
         finally:
             self.status = WorkerStatus.IDLE
-            # Clean up the request and token
             if request_id in self.pending_requests:
                 del self.pending_requests[request_id]
-            # Remove associated token
             to_remove = [
                 t for t, s in self.active_tokens.items()
                 if s.request_id == request_id
             ]
             for t in to_remove:
                 del self.active_tokens[t]
+            temp_dir.cleanup()
 
     def get_status(self):
         """Get current hosting status."""
