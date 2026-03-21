@@ -8,6 +8,7 @@ import {
   JobResult,
   JobStatus,
   HostingRequest,
+  ActiveJob,
 } from "./types";
 import {
   fetchWorkers,
@@ -16,6 +17,7 @@ import {
   startHosting,
   stopHosting,
   fetchHostingRequests,
+  fetchActiveJob,
   approveRequest,
   denyRequest,
   submitJob,
@@ -50,6 +52,7 @@ function App() {
   // Host state
   const [hostingRequests, setHostingRequests] = useState<HostingRequest[]>([]);
   const [hostIp, setHostIp] = useState<string | null>(null);
+  const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
 
   // Refs for cleanup
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -288,15 +291,19 @@ function App() {
       setSelectedWorker(null);
       setCurrentJob(null);
 
-      // Start polling for incoming requests
+      // Start polling for incoming requests and active job
       hostPollRef.current = setInterval(async () => {
         try {
-          const requests = await fetchHostingRequests();
+          const [requests, job] = await Promise.all([
+            fetchHostingRequests(),
+            fetchActiveJob(),
+          ]);
           setHostingRequests(requests);
+          setActiveJob(job);
         } catch {
           // Might fail if not hosting anymore
         }
-      }, 3000);
+      }, 2000);
     } catch (err) {
       console.error("Failed to start hosting:", err);
       alert("Failed to start hosting. Is the backend running?");
@@ -316,6 +323,7 @@ function App() {
     }
     setHostingRequests([]);
     setHostIp(null);
+    setActiveJob(null);
     setMode("guest");
     setStage("discover");
   };
@@ -385,6 +393,7 @@ function App() {
             onApprove={handleApproveRequest}
             onDeny={handleDenyRequest}
             hostIp={hostIp}
+            activeJob={activeJob}
           />
         ) : (
           <>

@@ -35,6 +35,10 @@ class HostingService:
         # Active session tokens (token -> SessionToken)
         self.active_tokens: Dict[str, SessionToken] = {}
 
+        # Active job tracking (for host UI)
+        self.active_job: Optional[dict] = None
+        self.active_job_logs: list = []
+
     def get_local_ip(self) -> str:
         """Get local IP address."""
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -192,6 +196,19 @@ class HostingService:
 
         self.status = WorkerStatus.BUSY
         start_time = time.time()
+
+        # Track active job for host UI
+        self.active_job = {
+            "request_id": request_id,
+            "guest_name": request.guest_name,
+            "guest_ip": request.guest_ip,
+            "code": request.code,
+            "filename": request.filename,
+            "state": "starting",
+            "started_at": datetime.now().isoformat(),
+        }
+        self.active_job_logs = []
+
         yield {"type": "status", "state": "starting", "job_id": request_id}
 
         temp_dir = tempfile.TemporaryDirectory()
@@ -218,6 +235,8 @@ class HostingService:
                 cwd=temp_dir.name,
             )
 
+            if self.active_job:
+                self.active_job["state"] = "running"
             yield {"type": "status", "state": "running", "job_id": request_id}
 
             stdout_lines = []
@@ -228,14 +247,18 @@ class HostingService:
                     line = await process.stdout.readline()
                     if not line:
                         break
-                    stdout_lines.append({"type": "stdout", "data": line.decode()})
+                    msg = {"type": "stdout", "data": line.decode()}
+                    stdout_lines.append(msg)
+                    self.active_job_logs.append(msg)
 
             async def collect_stderr():
                 while True:
                     line = await process.stderr.readline()
                     if not line:
                         break
-                    stderr_lines.append({"type": "stderr", "data": line.decode()})
+                    msg = {"type": "stderr", "data": line.decode()}
+                    stderr_lines.append(msg)
+                    self.active_job_logs.append(msg)
 
             try:
                 await asyncio.wait_for(
@@ -277,6 +300,8 @@ class HostingService:
             yield {"type": "error", "message": str(e), "job_id": request_id}
         finally:
             self.status = WorkerStatus.IDLE
+            if self.active_job:
+                self.active_job["state"] = "done"
             if request_id in self.pending_requests:
                 del self.pending_requests[request_id]
             to_remove = [

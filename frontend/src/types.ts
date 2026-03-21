@@ -45,8 +45,26 @@ export interface HostingRequest {
   created_at: string;
 }
 
+export interface ActiveJob {
+  active: boolean;
+  request_id?: string;
+  guest_name?: string;
+  guest_ip?: string;
+  code?: string;
+  filename?: string;
+  state?: string;
+  started_at?: string;
+  logs?: { type: string; data: string }[];
+}
+
 export type AppStage = "discover" | "submit" | "execution" | "complete";
 
 export type AppMode = "guest" | "host";
 
-export type JobStatus = "pending" | "approved" | "denied" | "running" | "done" | "error";
+export type JobStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "running"
+  | "done"
+  | "error";

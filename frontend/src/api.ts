@@ -1,4 +1,4 @@
-import { Worker, WorkerSpecs, HostingRequest } from "./types";
+import { Worker, WorkerSpecs, HostingRequest, ActiveJob } from "./types";
 
 const LOCAL_API = "http://localhost:8000";
 
@@ -101,6 +101,12 @@ export async function fetchHostingStatus(): Promise<{
 }> {
   const res = await fetch(`${LOCAL_API}/hosting/status`);
   if (!res.ok) throw new Error("Failed to fetch hosting status");
+  return res.json();
+}
+
+export async function fetchActiveJob(): Promise<ActiveJob> {
+  const res = await fetchWithTimeout(`${LOCAL_API}/hosting/active-job`);
+  if (!res.ok) throw new Error("Failed to fetch active job");
   return res.json();
 }
 

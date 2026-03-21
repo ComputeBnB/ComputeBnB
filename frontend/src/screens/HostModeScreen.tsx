@@ -1,6 +1,6 @@
-import React from 'react';
-import { Server, Wifi, Monitor, X, Check, XCircle, Code, Clock, User } from 'lucide-react';
-import { HostingRequest } from '../types';
+import React, { useRef, useEffect } from 'react';
+import { Server, Wifi, Monitor, X, Check, XCircle, Code, Clock, User, Play } from 'lucide-react';
+import { HostingRequest, ActiveJob } from '../types';
 
 interface HostModeScreenProps {
   onStopHosting: () => void;
@@ -8,6 +8,7 @@ interface HostModeScreenProps {
   onApprove: (requestId: string) => void;
   onDeny: (requestId: string) => void;
   hostIp: string | null;
+  activeJob: ActiveJob | null;
 }
 
 export const HostModeScreen: React.FC<HostModeScreenProps> = ({
@@ -16,11 +17,21 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
   onApprove,
   onDeny,
   hostIp,
+  activeJob,
 }) => {
+  const logEndRef = useRef<HTMLDivElement>(null);
+
   const formatTime = (isoString: string) => {
     const date = new Date(isoString);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  // Auto-scroll logs
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeJob?.logs?.length]);
+
+  const isJobRunning = activeJob?.active && activeJob.state !== 'done';
 
   return (
     <div className="h-full flex flex-col animate-fade-in">
@@ -51,14 +62,20 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
                 <div className="w-16 h-16 rounded-full bg-gradient-to-br from-app-accent to-blue-600 flex items-center justify-center">
                   <Server size={28} className="text-white" />
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-3 border-app-surface flex items-center justify-center animate-pulse">
+                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-3 border-app-surface flex items-center justify-center ${
+                  isJobRunning ? 'bg-yellow-500 animate-pulse' : 'bg-green-500 animate-pulse'
+                }`}>
                   <div className="w-2.5 h-2.5 bg-white rounded-full" />
                 </div>
               </div>
               <div>
-                <h2 className="text-lg font-bold text-app-text">Hosting Active</h2>
+                <h2 className="text-lg font-bold text-app-text">
+                  {isJobRunning ? 'Running Job' : 'Hosting Active'}
+                </h2>
                 <p className="text-sm text-app-text-secondary">
-                  Discoverable on the local network
+                  {isJobRunning
+                    ? `Executing code from ${activeJob?.guest_name}`
+                    : 'Discoverable on the local network'}
                 </p>
               </div>
             </div>
@@ -87,6 +104,90 @@ export const HostModeScreen: React.FC<HostModeScreenProps> = ({
               )}
             </div>
           </div>
+
+          {/* Active Job Execution */}
+          {activeJob?.active && (
+            <div className="bg-app-surface border border-app-border rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide flex items-center gap-2">
+                  <Play size={14} className="text-yellow-400" />
+                  Active Job
+                  {isJobRunning && (
+                    <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 text-xs font-medium">
+                      Running
+                    </span>
+                  )}
+                  {activeJob.state === 'done' && (
+                    <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">
+                      Done
+                    </span>
+                  )}
+                </h3>
+              </div>
+
+              {/* Job Info */}
+              <div className="flex items-center gap-4 mb-4 text-xs text-app-text-secondary">
+                <div className="flex items-center gap-1">
+                  <User size={12} />
+                  <span>{activeJob.guest_name}</span>
+                </div>
+                <span className="text-app-text-tertiary">{activeJob.guest_ip}</span>
+                {activeJob.started_at && (
+                  <div className="flex items-center gap-1">
+                    <Clock size={12} />
+                    <span>{formatTime(activeJob.started_at)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Code being executed */}
+              {activeJob.code && (
+                <div className="mb-4 p-3 bg-app-bg rounded-md border border-app-border/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Code size={12} className="text-app-text-tertiary" />
+                    <span className="text-xs text-app-text-tertiary font-medium">
+                      {activeJob.filename || 'main.py'}
+                    </span>
+                  </div>
+                  <pre className="text-xs text-app-text-secondary font-mono whitespace-pre-wrap break-all leading-relaxed max-h-32 overflow-y-auto">
+                    {activeJob.code}
+                  </pre>
+                </div>
+              )}
+
+              {/* Live Output */}
+              {activeJob.logs && activeJob.logs.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-medium text-app-text-secondary uppercase tracking-wide">
+                      Output
+                    </span>
+                    {isJobRunning && (
+                      <div className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                        <span className="text-xs text-green-400">Live</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-app-bg rounded-md border border-app-border/50 p-3 max-h-64 overflow-y-auto font-mono text-xs">
+                    {activeJob.logs.map((log, i) => (
+                      <div
+                        key={i}
+                        className={
+                          log.type === 'stderr'
+                            ? 'text-red-400'
+                            : 'text-app-text-secondary'
+                        }
+                      >
+                        {log.data}
+                      </div>
+                    ))}
+                    <div ref={logEndRef} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Pending Requests */}
           <div className="bg-app-surface border border-app-border rounded-xl p-6">

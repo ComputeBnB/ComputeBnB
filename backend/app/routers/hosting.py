@@ -61,6 +61,22 @@ async def approve_request(request_id: str):
     return result
 
 
+@router.get("/active-job")
+async def get_active_job():
+    """Get the currently running job info and logs (for host UI)."""
+    if not hosting_service.is_hosting:
+        raise HTTPException(status_code=400, detail="Not in hosting mode")
+
+    if not hosting_service.active_job:
+        return {"active": False}
+
+    return {
+        "active": True,
+        **hosting_service.active_job,
+        "logs": hosting_service.active_job_logs,
+    }
+
+
 @router.post("/requests/{request_id}/deny")
 async def deny_request(request_id: str):
     """Deny a pending job request."""
