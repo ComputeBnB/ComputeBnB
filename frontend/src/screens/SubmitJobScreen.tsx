@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import JSZip from "jszip";
 import {
   ArrowLeft,
   Upload,
@@ -45,15 +46,58 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
   const [code, setCode] = useState("");
   const [timeoutSecs, setTimeoutSecs] = useState(300);
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
+  const [fileInput, setFileInput] = useState<File | null>(null);
+  const [folderFiles, setFolderFiles] = useState<FileList | null>(null);
+  const [requirementsText, setRequirementsText] = useState("");
+  const [requirementsFile, setRequirementsFile] = useState<File | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!code.trim()) return;
-    onSubmit({
-      name: jobName || "Untitled Job",
-      code,
-      timeoutSecs,
-    });
+    // Must have code, file, or folder
+    if (!code.trim() && !fileInput && !folderFiles) return;
+
+    const formData = new FormData();
+    formData.append("guest_name", jobName || "Untitled Job");
+    formData.append("timeout_secs", timeoutSecs.toString());
+    // If folder selected, zip it
+    if (folderFiles && folderFiles.length > 0) {
+      const zip = new JSZip();
+      Array.from(folderFiles).forEach((file) => {
+        // Remove leading slashes from webkitRelativePath
+        const relPath = file.webkitRelativePath.replace(/^\/+/, "");
+        zip.file(relPath, file);
+      });
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      formData.append("file", new File([zipBlob], "job.zip"));
+    } else if (fileInput) {
+      formData.append("file", fileInput);
+    } else if (code.trim()) {
+      formData.append("code", code);
+    }
+    // requirements.txt
+    if (requirementsFile) {
+      formData.append("requirements", requirementsFile, "requirements.txt");
+    } else if (requirementsText.trim()) {
+      const blob = new Blob([requirementsText], { type: "text/plain" });
+      formData.append("requirements", blob, "requirements.txt");
+    }
+    // filename for .py file
+    if (fileInput && fileInput.name.endsWith(".py")) {
+      formData.append("filename", fileInput.name);
+    }
+    // Call backend endpoint (replace with your API call logic)
+    fetch("/api/jobs/request", {
+      method: "POST",
+      body: formData,
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        // handle response, e.g. show job status
+        alert("Job submitted! Request ID: " + data.request_id);
+      })
+      .catch((err) => {
+        alert("Job submit failed: " + err);
+      });
   };
 
   const handleBrowseFile = async () => {
@@ -168,7 +212,7 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
               />
             </div>
 
-            {/* Python Code */}
+            {/* Python Code or File/Folder Upload */}
             <div>
               <label className="block text-sm font-medium text-app-text mb-2">
                 Python Code <span className="text-app-error">*</span>
@@ -181,6 +225,8 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
                     .replace(/[\u2018\u2019]/g, "'");
                   setCode(sanitized);
                   setLoadedFileName(null);
+                  setFileInput(null);
+                  setFolderFiles(null);
                 }}
                 placeholder={
                   '# Write your Python code here\nprint("Hello from ComputeBnB!")'
@@ -191,12 +237,40 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
                 spellCheck={false}
                 data-gramm="false"
                 className="w-full px-4 py-3 rounded-lg bg-app-surface border border-app-border text-app-text placeholder:text-app-text-tertiary focus:outline-none focus:border-app-accent transition-colors font-mono text-sm leading-relaxed resize-none"
+                disabled={!!fileInput || !!folderFiles}
               />
-              <div className="flex items-center gap-3 mt-2">
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <input
+                  type="file"
+                  accept=".py,.zip"
+                  onChange={(e) => {
+                    setFileInput(e.target.files?.[0] || null);
+                    setLoadedFileName(e.target.files?.[0]?.name || null);
+                    setCode("");
+                    setFolderFiles(null);
+                  }}
+                  className="block"
+                  disabled={!!code || !!folderFiles}
+                />
+                <input
+                  type="file"
+                  webkitdirectory="true"
+                  directory="true"
+                  multiple
+                  onChange={(e) => {
+                    setFolderFiles(e.target.files);
+                    setLoadedFileName(e.target.files?.length ? "Folder selected" : null);
+                    setCode("");
+                    setFileInput(null);
+                  }}
+                  className="block"
+                  disabled={!!code || !!fileInput}
+                />
                 <button
                   type="button"
                   onClick={handleBrowseFile}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-app-text-secondary hover:text-app-text border border-app-border hover:bg-app-surface-elevated transition-all"
+                  disabled={!!fileInput || !!folderFiles}
                 >
                   <Upload size={14} />
                   <span>Load from file</span>
@@ -207,6 +281,37 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
                   </span>
                 )}
               </div>
+            </div>
+
+            {/* Requirements.txt input */}
+            <div>
+              <label className="block text-sm font-medium text-app-text mb-2">
+                requirements.txt (optional)
+              </label>
+              <textarea
+                value={requirementsText}
+                onChange={(e) => {
+                  setRequirementsText(e.target.value);
+                  setRequirementsFile(null);
+                }}
+                placeholder={"# List pip requirements here\nnumpy\npandas"}
+                rows={3}
+                className="w-full px-4 py-2 rounded-lg bg-app-surface border border-app-border text-app-text placeholder:text-app-text-tertiary focus:outline-none focus:border-app-accent transition-colors font-mono text-sm leading-relaxed resize-none"
+                disabled={!!requirementsFile}
+              />
+              <input
+                type="file"
+                accept=".txt"
+                onChange={(e) => {
+                  setRequirementsFile(e.target.files?.[0] || null);
+                  setRequirementsText("");
+                }}
+                className="block mt-2"
+                disabled={!!requirementsText}
+              />
+              {requirementsFile && (
+                <span className="text-xs text-app-text-tertiary">Loaded: {requirementsFile.name}</span>
+              )}
             </div>
 
             {/* Timeout */}

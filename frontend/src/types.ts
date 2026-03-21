@@ -33,6 +33,7 @@ export interface JobResult {
   exitCode: number;
   runtime: number;
   output: string;
+  outputFiles?: string[]; // List of output file names
 }
 
 export interface HostingRequest {

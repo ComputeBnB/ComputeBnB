@@ -132,8 +132,10 @@ class HostingService:
     # ── Request management ──────────────────────────────────────────
 
     def create_request(
-        self, guest_name: str, guest_ip: str, code: str,
+        self, guest_name: str, guest_ip: str, code: Optional[str] = None,
         filename: str = "main.py", timeout_secs: int = 300,
+        file_content: Optional[bytes] = None, requirements_content: Optional[bytes] = None,
+        file_name: Optional[str] = None, requirements_name: Optional[str] = None,
     ) -> JobRequest:
         """Create a pending job request from a guest."""
         request_id = f"req-{uuid.uuid4().hex[:8]}"
@@ -146,6 +148,10 @@ class HostingService:
             timeout_secs=timeout_secs,
             status=RequestStatus.PENDING,
             created_at=datetime.now(),
+            file_content=file_content,
+            requirements_content=requirements_content,
+            file_name=file_name,
+            requirements_name=requirements_name,
         )
         self.pending_requests[request_id] = request
         return request
@@ -210,9 +216,11 @@ class HostingService:
     # ── Job execution ───────────────────────────────────────────────
 
     async def execute_job(self, request_id: str) -> AsyncGenerator[dict, None]:
-        """Execute a job and yield streaming messages (stdout, stderr, done/error). Accepts either code as string or a file upload."""
+        """Execute a job in Docker, handle zip/.py/requirements.txt, and yield output files."""
         import tempfile
         import os
+        import zipfile
+        import shutil
         request = self.pending_requests.get(request_id)
         if not request:
             yield {"type": "error", "message": "Request not found"}
@@ -221,7 +229,6 @@ class HostingService:
         await self._update_advertised_status(WorkerStatus.BUSY)
         start_time = time.time()
 
-        # Track active job for host UI
         self.active_job = {
             "request_id": request_id,
             "guest_name": request.guest_name,
@@ -236,27 +243,64 @@ class HostingService:
         yield {"type": "status", "state": "starting", "job_id": request_id}
 
         temp_dir = tempfile.TemporaryDirectory()
-        code_path = os.path.join(temp_dir.name, request.filename)
-        output_path = os.path.join(temp_dir.name, "output.txt")
+        work_dir = temp_dir.name
+        main_py_path = os.path.join(work_dir, "main.py")
+        output_dir = os.path.join(work_dir, "output")
+        os.makedirs(output_dir, exist_ok=True)
+        requirements_path = os.path.join(work_dir, "requirements.txt")
+
         try:
-            # If request.code is not empty, write it to a file
-            if getattr(request, "code", None):
-                with open(code_path, "w") as f:
+            # Handle uploaded files: zip, .py, requirements.txt, or code string
+            if getattr(request, "file_content", None):
+                # If it's a zip file, extract it
+                if request.file_name and request.file_name.endswith(".zip"):
+                    with open(os.path.join(work_dir, request.file_name), "wb") as f:
+                        f.write(request.file_content)
+                    with zipfile.ZipFile(os.path.join(work_dir, request.file_name), 'r') as zip_ref:
+                        zip_ref.extractall(work_dir)
+                # If it's a .py file, save as main.py
+                elif request.file_name and request.file_name.endswith(".py"):
+                    with open(main_py_path, "wb") as f:
+                        f.write(request.file_content)
+                else:
+                    # Unknown file type, treat as main.py
+                    with open(main_py_path, "wb") as f:
+                        f.write(request.file_content)
+            elif getattr(request, "code", None):
+                with open(main_py_path, "w") as f:
                     f.write(request.code)
-            # If request has file_content, write it to a file (for future extension)
-            elif getattr(request, "file_content", None):
-                with open(code_path, "wb") as f:
-                    f.write(request.file_content)
             else:
                 yield {"type": "error", "message": "No code or file provided", "job_id": request_id}
                 return
 
-            # Run the code as a subprocess, redirect output to output.txt
+            # If requirements.txt was uploaded, save it
+            if getattr(request, "requirements_content", None):
+                with open(requirements_path, "wb") as f:
+                    f.write(request.requirements_content)
+            # If requirements.txt exists in extracted folder, leave as is
+
+            # Build Docker command
+            docker_image = "python:3.10-slim"
+            docker_cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{work_dir}:/workspace",
+                "-w", "/workspace",
+                docker_image,
+                "/bin/bash", "-c",
+            ]
+            # Compose the command to install requirements and run main.py
+            run_cmd = ""
+            if os.path.exists(requirements_path):
+                run_cmd += "pip install -r requirements.txt && "
+            run_cmd += "python main.py"
+            # Output files should be written to /workspace/output by user code
+            docker_cmd.append(run_cmd)
+
+            # Run the Docker container
             process = await asyncio.create_subprocess_exec(
-                "python3", code_path,
+                *docker_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=temp_dir.name,
             )
 
             if self.active_job:
@@ -296,21 +340,22 @@ class HostingService:
 
             await process.wait()
 
-            # Write stdout to output.txt
-            with open(output_path, "w") as out_f:
-                for msg in stdout_lines:
-                    out_f.write(msg["data"])
-
             # Yield collected output
             for msg in stdout_lines:
                 yield msg
             for msg in stderr_lines:
                 yield msg
 
-            # Send the output file content back to the client
-            with open(output_path, "r") as out_f:
-                output_content = out_f.read()
-            yield {"type": "output_file", "filename": "output.txt", "content": output_content}
+            # Collect output files from output_dir
+            output_files = []
+            if os.path.exists(output_dir):
+                for fname in os.listdir(output_dir):
+                    fpath = os.path.join(output_dir, fname)
+                    if os.path.isfile(fpath):
+                        with open(fpath, "rb") as outf:
+                            content = outf.read()
+                        output_files.append({"filename": fname, "content": content})
+                        yield {"type": "output_file", "filename": fname, "content_b64": content.hex()}  # hex for transport; frontend should decode
 
             duration_ms = int((time.time() - start_time) * 1000)
             yield {
@@ -318,6 +363,7 @@ class HostingService:
                 "job_id": request_id,
                 "exit_code": process.returncode,
                 "duration_ms": duration_ms,
+                "output_files": [f["filename"] for f in output_files],
             }
 
         except Exception as e:

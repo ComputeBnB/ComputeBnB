@@ -1,4 +1,21 @@
 import React from 'react';
+// Helper to download a file from the backend
+async function downloadOutputFile(requestId: string, filename: string) {
+  const res = await fetch(`/api/jobs/output/${requestId}/${filename}`);
+  if (!res.ok) {
+    alert('Failed to download file');
+    return;
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
 import { CheckCircle2, XCircle, Server, Clock, ArrowLeft, Terminal } from 'lucide-react';
 import { Worker, JobResult } from '../types';
 import { LogViewer } from '../components/LogViewer';
@@ -105,6 +122,30 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
                 logs={result.output.split('\n').filter((l) => l)}
                 title="Program Output"
               />
+            </div>
+          )}
+
+          {/* Output Files */}
+          {result?.outputFiles && result.outputFiles.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide mb-3">
+                Output Files
+              </h3>
+              <ul className="space-y-2">
+                {result.outputFiles.map((fname) => (
+                  <li key={fname} className="flex items-center gap-3">
+                    <button
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-app-text-secondary hover:text-app-text border border-app-border hover:bg-app-surface-elevated transition-all"
+                      onClick={() => downloadOutputFile(worker.id, fname)}
+                    >
+                      <span>{fname}</span>
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

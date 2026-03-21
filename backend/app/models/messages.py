@@ -32,11 +32,15 @@ class JobRequest(BaseModel):
     request_id: str
     guest_name: str
     guest_ip: str
-    code: str
+    code: Optional[str] = None
     filename: str = "main.py"
     timeout_secs: int = 300
     status: RequestStatus = RequestStatus.PENDING
     created_at: datetime = datetime.now()
+    file_content: Optional[bytes] = None
+    requirements_content: Optional[bytes] = None
+    file_name: Optional[str] = None
+    requirements_name: Optional[str] = None
 
 
 # Session token issued after host approves a request
