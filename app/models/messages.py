@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from enum import Enum
+from datetime import datetime
 
 
 class JobState(str, Enum):
@@ -19,21 +20,39 @@ class WorkerStatus(str, Enum):
     OFFLINE = "offline"
 
 
-# Client -> Worker messages
-class RunJobRequest(BaseModel):
-    type: str = "run"
-    job_id: str
-    timeout_secs: int = 300
-    filename: str = "main.py"
+class RequestStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DENIED = "denied"
+    EXPIRED = "expired"
+
+
+# Job request from guest to host (handshake)
+class JobRequest(BaseModel):
+    request_id: str
+    guest_name: str
+    guest_ip: str
     code: str
+    filename: str = "main.py"
+    timeout_secs: int = 300
+    status: RequestStatus = RequestStatus.PENDING
+    created_at: datetime = datetime.now()
 
 
+# Session token issued after host approves a request
+class SessionToken(BaseModel):
+    token: str
+    request_id: str
+    expires_at: datetime
+
+
+# Cancel request
 class CancelJobRequest(BaseModel):
     type: str = "cancel"
     job_id: str
 
 
-# Worker -> Client messages
+# Streaming messages (host -> guest over WebSocket)
 class StatusMessage(BaseModel):
     type: str = "status"
     state: JobState

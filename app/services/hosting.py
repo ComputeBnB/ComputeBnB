@@ -1,18 +1,25 @@
 """
-Hosting service - manages this machine's worker advertisement and job execution.
-When hosting is enabled, this machine advertises itself via mDNS and accepts jobs.
+Hosting service - manages this machine's worker advertisement, job approval, and execution.
+When hosting is enabled, this machine advertises itself via mDNS and accepts jobs
+through authenticated HTTP/WebSocket only (no raw TCP port).
 """
 
 import socket
 import uuid
 import platform
 import asyncio
-import json
-from typing import Optional
+import secrets
+import time
+from typing import Optional, Dict, AsyncGenerator
+from datetime import datetime, timedelta
 from zeroconf import Zeroconf, ServiceInfo
+from app.models.messages import (
+    JobRequest, SessionToken, RequestStatus, WorkerStatus,
+)
 
 SERVICE_TYPE = "_compute-worker._tcp.local."
-WORKER_PORT = 9000
+FASTAPI_PORT = 8000
+TOKEN_EXPIRY_MINUTES = 5
 
 
 class HostingService:
@@ -21,8 +28,12 @@ class HostingService:
         self.worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         self.zeroconf: Optional[Zeroconf] = None
         self.service_info: Optional[ServiceInfo] = None
-        self.server_task: Optional[asyncio.Task] = None
-        self.server_socket: Optional[socket.socket] = None
+        self.status: WorkerStatus = WorkerStatus.IDLE
+
+        # Pending job requests from guests (request_id -> JobRequest)
+        self.pending_requests: Dict[str, JobRequest] = {}
+        # Active session tokens (token -> SessionToken)
+        self.active_tokens: Dict[str, SessionToken] = {}
 
     def get_local_ip(self) -> str:
         """Get local IP address."""
@@ -35,22 +46,23 @@ class HostingService:
             s.close()
 
     async def start_hosting(self):
-        """Enable hosting mode - advertise via mDNS and start accepting jobs."""
+        """Enable hosting mode - advertise via mDNS on the FastAPI port."""
         if self.is_hosting:
             return {"status": "already_hosting", "worker_id": self.worker_id}
 
         self.is_hosting = True
+        self.status = WorkerStatus.IDLE
         local_ip = self.get_local_ip()
         hostname = socket.gethostname()
 
-        # Register mDNS service
+        # Register mDNS service - advertise FastAPI port, not a raw TCP port
         loop = asyncio.get_event_loop()
         self.zeroconf = Zeroconf()
         self.service_info = ServiceInfo(
             SERVICE_TYPE,
             f"{self.worker_id}.{SERVICE_TYPE}",
             addresses=[socket.inet_aton(local_ip)],
-            port=WORKER_PORT,
+            port=FASTAPI_PORT,
             properties={
                 "worker_id": self.worker_id,
                 "display_name": hostname,
@@ -60,22 +72,20 @@ class HostingService:
         )
         await loop.run_in_executor(None, self.zeroconf.register_service, self.service_info)
 
-        # Start TCP server for job execution
-        self.server_task = asyncio.create_task(self._run_server())
-
         return {
             "status": "hosting_started",
             "worker_id": self.worker_id,
             "ip": local_ip,
-            "port": WORKER_PORT
+            "port": FASTAPI_PORT,
         }
 
     async def stop_hosting(self):
-        """Disable hosting mode - stop advertising and accepting jobs."""
+        """Disable hosting mode - stop advertising and reject new requests."""
         if not self.is_hosting:
             return {"status": "not_hosting"}
 
         self.is_hosting = False
+        self.status = WorkerStatus.OFFLINE
 
         # Unregister mDNS service
         if self.zeroconf and self.service_info:
@@ -85,89 +95,190 @@ class HostingService:
             self.zeroconf = None
             self.service_info = None
 
-        # Stop TCP server
-        if self.server_task:
-            self.server_task.cancel()
-            try:
-                await self.server_task
-            except asyncio.CancelledError:
-                pass
-            self.server_task = None
-
-        if self.server_socket:
-            self.server_socket.close()
-            self.server_socket = None
+        # Clear pending requests and tokens
+        self.pending_requests.clear()
+        self.active_tokens.clear()
 
         return {"status": "hosting_stopped"}
 
-    async def _run_server(self):
-        """Run the TCP server to accept job connections."""
-        loop = asyncio.get_event_loop()
+    # ── Request management ──────────────────────────────────────────
 
-        # Create TCP server socket
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind(("0.0.0.0", WORKER_PORT))
-        self.server_socket.listen(5)
-        self.server_socket.setblocking(False)
+    def create_request(
+        self, guest_name: str, guest_ip: str, code: str,
+        filename: str = "main.py", timeout_secs: int = 300,
+    ) -> JobRequest:
+        """Create a pending job request from a guest."""
+        request_id = f"req-{uuid.uuid4().hex[:8]}"
+        request = JobRequest(
+            request_id=request_id,
+            guest_name=guest_name,
+            guest_ip=guest_ip,
+            code=code,
+            filename=filename,
+            timeout_secs=timeout_secs,
+            status=RequestStatus.PENDING,
+            created_at=datetime.now(),
+        )
+        self.pending_requests[request_id] = request
+        return request
 
-        print(f"[Hosting] TCP server listening on port {WORKER_PORT}")
+    def get_request(self, request_id: str) -> Optional[JobRequest]:
+        """Get a job request by ID."""
+        return self.pending_requests.get(request_id)
+
+    def get_all_pending(self) -> list:
+        """Get all pending requests (for host UI)."""
+        return [
+            r for r in self.pending_requests.values()
+            if r.status == RequestStatus.PENDING
+        ]
+
+    def approve_request(self, request_id: str) -> Optional[dict]:
+        """Approve a pending request and generate a session token."""
+        request = self.pending_requests.get(request_id)
+        if not request or request.status != RequestStatus.PENDING:
+            return None
+
+        request.status = RequestStatus.ACCEPTED
+
+        # Generate a secure session token
+        token = secrets.token_urlsafe(32)
+        session = SessionToken(
+            token=token,
+            request_id=request_id,
+            expires_at=datetime.now() + timedelta(minutes=TOKEN_EXPIRY_MINUTES),
+        )
+        self.active_tokens[token] = session
+
+        return {
+            "request_id": request_id,
+            "status": "accepted",
+            "token": token,
+            "expires_at": session.expires_at.isoformat(),
+        }
+
+    def deny_request(self, request_id: str) -> Optional[dict]:
+        """Deny a pending request."""
+        request = self.pending_requests.get(request_id)
+        if not request or request.status != RequestStatus.PENDING:
+            return None
+
+        request.status = RequestStatus.DENIED
+        return {"request_id": request_id, "status": "denied"}
+
+    # ── Token validation ────────────────────────────────────────────
+
+    def validate_token(self, token: str) -> Optional[SessionToken]:
+        """Validate a session token. Returns the session if valid, None if not."""
+        session = self.active_tokens.get(token)
+        if not session:
+            return None
+        if datetime.now() > session.expires_at:
+            # Expired - clean up
+            del self.active_tokens[token]
+            return None
+        return session
+
+    # ── Job execution ───────────────────────────────────────────────
+
+    async def execute_job(self, request_id: str) -> AsyncGenerator[dict, None]:
+        """Execute a job and yield streaming messages (stdout, stderr, done/error)."""
+        request = self.pending_requests.get(request_id)
+        if not request:
+            yield {"type": "error", "message": "Request not found"}
+            return
+
+        self.status = WorkerStatus.BUSY
+        start_time = time.time()
+
+        yield {"type": "status", "state": "starting", "job_id": request_id}
 
         try:
-            while self.is_hosting:
-                # Accept connections asynchronously
-                conn, addr = await loop.sock_accept(self.server_socket)
-                print(f"[Hosting] Connection from {addr}")
+            # Run the code as a subprocess
+            process = await asyncio.create_subprocess_exec(
+                "python3", "-c", request.code,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-                # Handle connection in background
-                asyncio.create_task(self._handle_connection(conn, addr))
-        except asyncio.CancelledError:
-            print("[Hosting] Server stopped")
-        finally:
-            if self.server_socket:
-                self.server_socket.close()
+            yield {"type": "status", "state": "running", "job_id": request_id}
 
-    async def _handle_connection(self, conn: socket.socket, addr):
-        """Handle an incoming job connection."""
-        loop = asyncio.get_event_loop()
+            # Stream stdout
+            async def stream_stdout():
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    yield {"type": "stdout", "data": line.decode()}
 
-        try:
-            conn.setblocking(False)
+            async def stream_stderr():
+                while True:
+                    line = await process.stderr.readline()
+                    if not line:
+                        break
+                    yield {"type": "stderr", "data": line.decode()}
 
-            # Read incoming data
-            data = await loop.sock_recv(conn, 4096)
-            if data:
-                message = data.decode()
-                print(f"[Hosting] Received: {message}")
+            # Read both streams concurrently
+            stdout_lines = []
+            stderr_lines = []
 
-                # Parse the job request
-                try:
-                    job_data = json.loads(message)
-                    print(f"[Hosting] Job type: {job_data.get('type')}")
+            async def collect_stdout():
+                async for msg in stream_stdout():
+                    stdout_lines.append(msg)
 
-                    # Send acknowledgment
-                    response = json.dumps({"type": "status", "state": "connected"}) + "\n"
-                    await loop.sock_sendall(conn, response.encode())
+            async def collect_stderr():
+                async for msg in stream_stderr():
+                    stderr_lines.append(msg)
 
-                    # TODO: Execute the job here
-                    # For now, just acknowledge
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(collect_stdout(), collect_stderr()),
+                    timeout=request.timeout_secs,
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                yield {"type": "error", "message": "Job timed out", "job_id": request_id}
+                return
 
-                except json.JSONDecodeError:
-                    error_response = json.dumps({"type": "error", "message": "invalid_json"}) + "\n"
-                    await loop.sock_sendall(conn, error_response.encode())
+            await process.wait()
+
+            # Yield collected output
+            for msg in stdout_lines:
+                yield msg
+            for msg in stderr_lines:
+                yield msg
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            yield {
+                "type": "done",
+                "job_id": request_id,
+                "exit_code": process.returncode,
+                "duration_ms": duration_ms,
+            }
 
         except Exception as e:
-            print(f"[Hosting] Error handling connection: {e}")
+            yield {"type": "error", "message": str(e), "job_id": request_id}
         finally:
-            conn.close()
-            print(f"[Hosting] Connection closed")
+            self.status = WorkerStatus.IDLE
+            # Clean up the request and token
+            if request_id in self.pending_requests:
+                del self.pending_requests[request_id]
+            # Remove associated token
+            to_remove = [
+                t for t, s in self.active_tokens.items()
+                if s.request_id == request_id
+            ]
+            for t in to_remove:
+                del self.active_tokens[t]
 
     def get_status(self):
         """Get current hosting status."""
         return {
             "is_hosting": self.is_hosting,
             "worker_id": self.worker_id if self.is_hosting else None,
-            "port": WORKER_PORT if self.is_hosting else None
+            "port": FASTAPI_PORT if self.is_hosting else None,
+            "status": self.status.value,
+            "pending_requests": len(self.get_all_pending()),
         }
 
 
