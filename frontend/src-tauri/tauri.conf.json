@@ -22,8 +22,10 @@
       },
       "fs": {
         "all": false,
+        "createDir": true,
         "readDir": true,
         "readFile": true,
+        "writeFile": true,
         "scope": ["**"]
       }
     },

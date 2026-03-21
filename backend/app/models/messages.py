@@ -99,6 +99,13 @@ class ErrorMessage(BaseModel):
     message: str
 
 
+class GeneratedFileMessage(BaseModel):
+    type: str = "generated_file"
+    path: str
+    content_b64: str
+    size_bytes: int
+
+
 # Worker info for discovery
 class WorkerInfo(BaseModel):
     worker_id: str

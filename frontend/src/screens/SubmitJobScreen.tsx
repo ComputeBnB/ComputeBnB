@@ -254,6 +254,7 @@ export const SubmitJobScreen: React.FC<SubmitJobScreenProps> = ({
       const selected = await tauriDialog.open({
         directory: true,
         multiple: false,
+        recursive: true,
       });
 
       if (!selected || typeof selected !== "string") return;

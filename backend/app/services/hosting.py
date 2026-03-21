@@ -24,6 +24,9 @@ from app.models.messages import (
 SERVICE_TYPE = "_compute-worker._tcp.local."
 FASTAPI_PORT = 8000
 TOKEN_EXPIRY_MINUTES = 5
+IGNORED_OUTPUT_SEGMENTS = {".computebnb_deps", "__pycache__", ".pytest_cache", ".mypy_cache"}
+MAX_RETURNED_FILE_BYTES = 2 * 1024 * 1024
+MAX_RETURNED_FILE_COUNT = 25
 
 
 class HostingService:
@@ -306,6 +309,54 @@ class HostingService:
         requirements_path = self._resolve_requirements_path(workspace_root)
         return entrypoint, file_count, requirements_path
 
+    def _list_workspace_files(self, workspace_root: str) -> set[str]:
+        files: set[str] = set()
+        workspace = Path(workspace_root)
+
+        for path in workspace.rglob("*"):
+            if not path.is_file():
+                continue
+
+            relative_path = path.relative_to(workspace).as_posix()
+            parts = Path(relative_path).parts
+            if any(part in IGNORED_OUTPUT_SEGMENTS for part in parts):
+                continue
+
+            files.add(relative_path)
+
+        return files
+
+    def _collect_generated_files(
+        self,
+        workspace_root: str,
+        initial_files: set[str],
+    ) -> tuple[list[ProjectFile], list[str]]:
+        workspace = Path(workspace_root)
+        generated_paths = sorted(self._list_workspace_files(workspace_root) - initial_files)
+        returned_files: list[ProjectFile] = []
+        skipped_paths: list[str] = []
+
+        for relative_path in generated_paths:
+            if len(returned_files) >= MAX_RETURNED_FILE_COUNT:
+                skipped_paths.append(relative_path)
+                continue
+
+            file_path = workspace / relative_path
+            size_bytes = file_path.stat().st_size
+            if size_bytes > MAX_RETURNED_FILE_BYTES:
+                skipped_paths.append(relative_path)
+                continue
+
+            returned_files.append(
+                ProjectFile(
+                    path=relative_path,
+                    content_b64=base64.b64encode(file_path.read_bytes()).decode("ascii"),
+                    size_bytes=size_bytes,
+                )
+            )
+
+        return returned_files, skipped_paths
+
     async def _start_docker_process(
         self,
         workspace_root: str,
@@ -444,6 +495,7 @@ class HostingService:
                 workspace_root,
                 request,
             )
+            initial_workspace_files = self._list_workspace_files(workspace_root)
 
             if self.active_job:
                 self.active_job["filename"] = entrypoint
@@ -539,6 +591,32 @@ class HostingService:
 
             await run_process.wait()
             await self._cleanup_container(run_container)
+
+            generated_files, skipped_generated_files = self._collect_generated_files(
+                workspace_root,
+                initial_workspace_files,
+            )
+
+            if generated_files:
+                yield self._build_status_message(
+                    request_id,
+                    "running",
+                    f"Returning {len(generated_files)} generated file(s) to guest",
+                )
+                for generated_file in generated_files:
+                    yield {
+                        "type": "generated_file",
+                        "path": generated_file.path,
+                        "content_b64": generated_file.content_b64,
+                        "size_bytes": generated_file.size_bytes,
+                    }
+
+            if skipped_generated_files:
+                yield self._build_status_message(
+                    request_id,
+                    "running",
+                    f"Skipped {len(skipped_generated_files)} generated file(s) because they exceeded return limits",
+                )
 
             output_path = Path(workspace_root) / "output.txt"
             output_path.write_text("".join(stdout_output), encoding="utf-8")

@@ -55,6 +55,7 @@ export interface JobResult {
   exitCode: number;
   runtime: number;
   output: string;
+  generatedFiles: ProjectFileUpload[];
 }
 
 export interface HostingRequest {

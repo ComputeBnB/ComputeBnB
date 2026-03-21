@@ -1,7 +1,70 @@
-import React from 'react';
-import { CheckCircle2, XCircle, Server, Clock, ArrowLeft, Terminal } from 'lucide-react';
-import { Worker, JobResult } from '../types';
+import React, { useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  XCircle,
+  Server,
+  Clock,
+  ArrowLeft,
+  Terminal,
+  FileOutput,
+  Download,
+} from 'lucide-react';
+import { Worker, JobResult, ProjectFileUpload } from '../types';
 import { LogViewer } from '../components/LogViewer';
+
+type TauriDialogModule = typeof import('@tauri-apps/api/dialog');
+type TauriFsModule = typeof import('@tauri-apps/api/fs');
+
+let tauriDialog: TauriDialogModule | null = null;
+let tauriFs: TauriFsModule | null = null;
+
+try {
+  import('@tauri-apps/api/dialog').then((module) => {
+    tauriDialog = module;
+  });
+  import('@tauri-apps/api/fs').then((module) => {
+    tauriFs = module;
+  });
+} catch {
+  // Not running in Tauri.
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function previewText(file: ProjectFileUpload): string | null {
+  if (file.size_bytes > 32 * 1024) return null;
+
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(base64ToBytes(file.content_b64));
+    const trimmed = text.trim();
+    if (!trimmed) return '(empty file)';
+    return trimmed.length > 320 ? `${trimmed.slice(0, 320)}...` : trimmed;
+  } catch {
+    return null;
+  }
+}
+
+function joinPath(basePath: string, relativePath: string): string {
+  const normalizedBase = basePath.replace(/[\\/]+$/, '');
+  const normalizedRelative = relativePath.replace(/\\/g, '/');
+  return `${normalizedBase}/${normalizedRelative}`;
+}
+
+function parentDirectory(relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length <= 1) return null;
+  return segments.slice(0, -1).join('/');
+}
 
 interface JobCompleteScreenProps {
   worker: Worker;
@@ -17,12 +80,59 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
   onReturn,
 }) => {
   const isSuccess = result?.exitCode === 0;
+  const [isSavingFiles, setIsSavingFiles] = useState(false);
+  const generatedFiles = result?.generatedFiles ?? [];
+
+  const filePreviews = useMemo(
+    () =>
+      generatedFiles.map((file) => ({
+        file,
+        preview: previewText(file),
+      })),
+    [generatedFiles],
+  );
 
   const formatRuntime = (seconds: number) => {
     if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const mins = Math.floor(seconds / 60);
     const secs = (seconds % 60).toFixed(1);
     return `${mins}m ${secs}s`;
+  };
+
+  const handleSaveFiles = async () => {
+    if (!generatedFiles.length) return;
+
+    if (!tauriDialog || !tauriFs) {
+      alert('Saving returned files is only available in the desktop app.');
+      return;
+    }
+
+    try {
+      setIsSavingFiles(true);
+      const selected = await tauriDialog.open({
+        directory: true,
+        multiple: false,
+        recursive: true,
+        title: 'Choose where to save returned files',
+      });
+
+      if (!selected || typeof selected !== 'string') return;
+
+      for (const file of generatedFiles) {
+        const parent = parentDirectory(file.path);
+        if (parent) {
+          await tauriFs.createDir(joinPath(selected, parent), { recursive: true });
+        }
+        await tauriFs.writeBinaryFile(joinPath(selected, file.path), base64ToBytes(file.content_b64));
+      }
+
+      alert(`Saved ${generatedFiles.length} file(s) to ${selected}`);
+    } catch (error) {
+      console.error('Failed to save returned files:', error);
+      alert('Failed to save returned files.');
+    } finally {
+      setIsSavingFiles(false);
+    }
   };
 
   return (
@@ -105,6 +215,52 @@ export const JobCompleteScreen: React.FC<JobCompleteScreenProps> = ({
                 logs={result.output.split('\n').filter((l) => l)}
                 title="Program Output"
               />
+            </div>
+          )}
+
+          {generatedFiles.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-xl border border-app-border bg-app-surface p-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-app-text uppercase tracking-wide">
+                    Returned Files
+                  </h3>
+                  <p className="mt-1 text-sm text-app-text-secondary">
+                    The host sent back {generatedFiles.length} generated file(s) from the Docker workspace.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveFiles}
+                  disabled={isSavingFiles}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text transition-all hover:bg-app-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download size={16} />
+                  <span>{isSavingFiles ? 'Saving...' : 'Save returned files'}</span>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {filePreviews.map(({ file, preview }) => (
+                  <div key={file.path} className="rounded-xl border border-app-border bg-app-surface p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-app-text">
+                          <FileOutput size={16} className="shrink-0 text-app-text-tertiary" />
+                          <span className="truncate font-mono text-sm">{file.path}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-app-text-tertiary">
+                          {formatBytes(file.size_bytes)}
+                        </div>
+                      </div>
+                    </div>
+                    {preview && (
+                      <pre className="mt-3 overflow-x-auto rounded-lg border border-app-border/70 bg-app-bg px-3 py-2 text-xs leading-relaxed text-app-text-secondary whitespace-pre-wrap break-words">
+                        {preview}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

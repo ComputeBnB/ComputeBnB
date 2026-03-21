@@ -330,6 +330,19 @@ Initial MVP note:
 { "type": "done", "exit_code": 0, "duration_ms": 820 }
 ```
 
+#### Generated File
+
+```json
+{
+  "type": "generated_file",
+  "path": "artifacts/report.json",
+  "content_b64": "ewogICJyb3dzIjogW10KfQ==",
+  "size_bytes": 18
+}
+```
+
+Generated files are streamed back automatically after execution finishes. For the MVP, return artifacts should stay small enough to fit comfortably over the WebSocket stream.
+
 #### Error
 
 ```json
@@ -346,9 +359,10 @@ Initial MVP note:
 6. User sets a timeout
 7. Client sends the project files and entrypoint metadata to the worker
 8. Worker starts a Docker container, installs `requirements.txt` when present, and executes the entrypoint
-9. Client receives live logs and status updates
+9. Client receives live logs, status updates, and any generated files from the workspace
 10. Job finishes or times out
-11. Worker returns to idle
+11. Guest can review returned files and optionally save them locally
+12. Worker returns to idle
 
 ## Team Plan
 

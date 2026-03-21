@@ -9,6 +9,7 @@ import {
   JobStatus,
   HostingRequest,
   ActiveJob,
+  ProjectFileUpload,
 } from "./types";
 import {
   fetchWorkers,
@@ -216,6 +217,7 @@ function App() {
     const ws = createJobWebSocket(worker, requestId, token);
     wsRef.current = ws;
     const collectedOutput: string[] = [];
+    const collectedGeneratedFiles: ProjectFileUpload[] = [];
 
     // Start elapsed time counter
     timerRef.current = setInterval(() => {
@@ -254,6 +256,18 @@ function App() {
           setExecutionLogs((prev) => [...prev, `[stderr] ${msg.data}`]);
           break;
 
+        case "generated_file":
+          collectedGeneratedFiles.push({
+            path: msg.path,
+            content_b64: msg.content_b64,
+            size_bytes: msg.size_bytes,
+          });
+          setExecutionLogs((prev) => [
+            ...prev,
+            `[artifact] Received ${msg.path} (${msg.size_bytes} bytes)`,
+          ]);
+          break;
+
         case "done":
           if (timerRef.current) clearInterval(timerRef.current);
           setJobStatus("done");
@@ -267,6 +281,7 @@ function App() {
             exitCode: msg.exit_code,
             runtime: msg.duration_ms / 1000,
             output: collectedOutput.join(""),
+            generatedFiles: [...collectedGeneratedFiles],
           });
           // Small delay so user sees the final log before transitioning
           setTimeout(() => setStage("complete"), 1000);
@@ -282,6 +297,7 @@ function App() {
             exitCode: 1,
             runtime: elapsedTime,
             output: collectedOutput.join(""),
+            generatedFiles: [...collectedGeneratedFiles],
           });
           setTimeout(() => setStage("complete"), 1500);
           break;
