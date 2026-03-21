@@ -4,9 +4,14 @@ and manage job approval/denial.
 """
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from app.services.hosting import hosting_service
 
 router = APIRouter(prefix="/hosting", tags=["hosting"])
+
+
+class ApproveRequestBody(BaseModel):
+    charge_enabled: bool = False
 
 
 @router.post("/start")
@@ -57,12 +62,12 @@ async def get_pending_requests():
 
 
 @router.post("/requests/{request_id}/approve")
-async def approve_request(request_id: str):
+async def approve_request(request_id: str, body: ApproveRequestBody):
     """Approve a pending job request. Returns a session token for the guest."""
     if not hosting_service.is_hosting:
         raise HTTPException(status_code=400, detail="Not in hosting mode")
 
-    result = hosting_service.approve_request(request_id)
+    result = hosting_service.approve_request(request_id, charge_enabled=body.charge_enabled)
     if not result:
         raise HTTPException(status_code=404, detail="Request not found or not pending")
     return result
@@ -77,11 +82,7 @@ async def get_active_job():
     if not hosting_service.active_job:
         return {"active": False}
 
-    return {
-        "active": True,
-        **hosting_service.active_job,
-        "logs": hosting_service.active_job_logs,
-    }
+    return hosting_service.get_active_job_snapshot()
 
 
 @router.post("/requests/{request_id}/deny")

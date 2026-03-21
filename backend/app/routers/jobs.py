@@ -67,6 +67,8 @@ async def get_request_status(request_id: str):
     result = {
         "request_id": request_id,
         "status": job_request.status.value,
+        "charge_enabled": job_request.charge_enabled,
+        "charge_rate_usd_per_hour": job_request.charge_rate_usd_per_hour,
     }
 
     # If accepted, find the token for this request
@@ -78,6 +80,31 @@ async def get_request_status(request_id: str):
                 break
 
     return result
+
+
+@router.post("/request/{request_id}/pay")
+async def pay_for_job(request_id: str):
+    """Fake payment endpoint for guest-side demo flows."""
+    if not hosting_service.is_hosting:
+        raise HTTPException(status_code=400, detail="This machine is not hosting")
+
+    if not hosting_service.mark_paid(request_id):
+        raise HTTPException(status_code=404, detail="Charge not found or already free")
+
+    active_job = hosting_service.get_active_job_snapshot()
+    payment_fields = {
+        "paid": True,
+        "balance_due_usd": 0.0,
+        "payment_status": "paid",
+    }
+    if active_job.get("request_id") == request_id:
+        payment_fields["total_charge_usd"] = active_job.get("total_charge_usd", 0.0)
+
+    return {
+        "request_id": request_id,
+        "status": "paid",
+        **payment_fields,
+    }
 
 
 @router.websocket("/execute/{request_id}")

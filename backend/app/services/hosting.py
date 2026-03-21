@@ -24,9 +24,11 @@ from app.models.messages import (
 SERVICE_TYPE = "_compute-worker._tcp.local."
 FASTAPI_PORT = 8000
 TOKEN_EXPIRY_MINUTES = 5
+DEFAULT_CHARGE_USD_PER_HOUR = 18.0
 IGNORED_OUTPUT_SEGMENTS = {".computebnb_deps", "__pycache__", ".pytest_cache", ".mypy_cache"}
 MAX_RETURNED_FILE_BYTES = 2 * 1024 * 1024
 MAX_RETURNED_FILE_COUNT = 25
+TERMINAL_JOB_STATES = {"done", "failed", "timeout", "cancelled"}
 
 
 class HostingService:
@@ -45,6 +47,7 @@ class HostingService:
         # Active job tracking (for host UI)
         self.active_job: Optional[dict] = None
         self.active_job_logs: list = []
+        self.completed_jobs: Dict[str, dict] = {}
 
     async def _update_advertised_status(self, status: WorkerStatus) -> None:
         self.status = status
@@ -133,6 +136,7 @@ class HostingService:
         self.active_tokens.clear()
         self.active_job = None
         self.active_job_logs = []
+        self.completed_jobs.clear()
 
         return {"status": "hosting_stopped"}
 
@@ -159,6 +163,10 @@ class HostingService:
             timeout_secs=timeout_secs,
             status=RequestStatus.PENDING,
             created_at=datetime.now(),
+            charge_enabled=False,
+            charge_rate_usd_per_hour=0.0,
+            paid=False,
+            total_charge_usd=0.0,
         )
         self.pending_requests[request_id] = request
         return request
@@ -174,13 +182,15 @@ class HostingService:
             if r.status == RequestStatus.PENDING
         ]
 
-    def approve_request(self, request_id: str) -> Optional[dict]:
+    def approve_request(self, request_id: str, charge_enabled: bool = False) -> Optional[dict]:
         """Approve a pending request and generate a session token."""
         request = self.pending_requests.get(request_id)
         if not request or request.status != RequestStatus.PENDING:
             return None
 
         request.status = RequestStatus.ACCEPTED
+        request.charge_enabled = charge_enabled
+        request.charge_rate_usd_per_hour = DEFAULT_CHARGE_USD_PER_HOUR if charge_enabled else 0.0
 
         # Generate a secure session token
         token = secrets.token_urlsafe(32)
@@ -196,6 +206,8 @@ class HostingService:
             "status": "accepted",
             "token": token,
             "expires_at": session.expires_at.isoformat(),
+            "charge_enabled": request.charge_enabled,
+            "charge_rate_usd_per_hour": request.charge_rate_usd_per_hour,
         }
 
     def deny_request(self, request_id: str) -> Optional[dict]:
@@ -209,16 +221,118 @@ class HostingService:
 
     def mark_paid(self, request_id: str) -> bool:
         """Mark a job request as paid."""
-        request = self.pending_requests.get(request_id)
-        if not request:
+        record = self.completed_jobs.get(request_id)
+        if not record or not record.get("charge_enabled"):
             return False
-        request.paid = True
+
+        record["paid"] = True
+        record["balance_due_usd"] = 0.0
+        record["payment_status"] = "paid"
+        record["payment_received_at"] = datetime.now().isoformat()
+
+        if self.active_job and self.active_job.get("request_id") == request_id:
+            self.active_job["paid"] = True
+            self.active_job["balance_due_usd"] = 0.0
+            self.active_job["payment_status"] = "paid"
+            self.active_job["payment_received_at"] = record["payment_received_at"]
+
+        request = self.pending_requests.get(request_id)
+        if request:
+            request.paid = True
+
         return True
 
     def is_paid(self, request_id: str) -> bool:
         """Check if a job request is paid."""
+        record = self.completed_jobs.get(request_id)
+        if record:
+            return bool(record.get("paid", False))
         request = self.pending_requests.get(request_id)
         return bool(request and getattr(request, 'paid', False))
+
+    def _round_currency(self, value: float) -> float:
+        return round(max(value, 0.0), 2)
+
+    def _compute_charge_usd(self, elapsed_seconds: float, rate_usd_per_hour: float) -> float:
+        if rate_usd_per_hour <= 0:
+            return 0.0
+        return self._round_currency((elapsed_seconds / 3600) * rate_usd_per_hour)
+
+    def _payment_status(self, charge_enabled: bool, paid: bool, balance_due_usd: float) -> str:
+        if not charge_enabled:
+            return "not_required"
+        if paid or balance_due_usd <= 0:
+            return "paid"
+        return "payment_due"
+
+    def _payment_payload(self, job_snapshot: dict) -> dict:
+        return {
+            "charge_enabled": bool(job_snapshot.get("charge_enabled", False)),
+            "charge_rate_usd_per_hour": float(job_snapshot.get("charge_rate_usd_per_hour", 0.0)),
+            "total_charge_usd": self._round_currency(float(job_snapshot.get("total_charge_usd", 0.0))),
+            "balance_due_usd": self._round_currency(float(job_snapshot.get("balance_due_usd", 0.0))),
+            "paid": bool(job_snapshot.get("paid", False)),
+            "payment_status": job_snapshot.get("payment_status", "not_required"),
+        }
+
+    def _update_active_job_charge(self, elapsed_seconds: float, final: bool = False) -> None:
+        if not self.active_job:
+            return
+
+        charge_enabled = bool(self.active_job.get("charge_enabled", False))
+        total_charge_usd = self._compute_charge_usd(
+            elapsed_seconds,
+            float(self.active_job.get("charge_rate_usd_per_hour", 0.0)),
+        )
+        balance_due_usd = 0.0 if self.active_job.get("paid") else total_charge_usd
+
+        self.active_job["total_charge_usd"] = total_charge_usd
+        self.active_job["balance_due_usd"] = self._round_currency(balance_due_usd)
+        self.active_job["payment_status"] = self._payment_status(
+            charge_enabled,
+            bool(self.active_job.get("paid", False)),
+            balance_due_usd,
+        )
+
+        if final:
+            self.active_job["completed_at"] = datetime.now().isoformat()
+
+    def _finalize_completed_job(self, request_id: str, start_time: float) -> dict:
+        if not self.active_job:
+            return self.completed_jobs.get(request_id, {})
+
+        self._update_active_job_charge(time.time() - start_time, final=True)
+        snapshot = dict(self.active_job)
+        snapshot.pop("started_at_ts", None)
+        self.completed_jobs[request_id] = snapshot
+        return snapshot
+
+    def get_active_job_snapshot(self) -> dict:
+        if not self.active_job:
+            return {"active": False}
+
+        job_snapshot = dict(self.active_job)
+        started_at_ts = job_snapshot.get("started_at_ts")
+        if started_at_ts and job_snapshot.get("state") not in TERMINAL_JOB_STATES:
+            elapsed_seconds = time.time() - float(started_at_ts)
+            total_charge_usd = self._compute_charge_usd(
+                elapsed_seconds,
+                float(job_snapshot.get("charge_rate_usd_per_hour", 0.0)),
+            )
+            job_snapshot["total_charge_usd"] = total_charge_usd
+            job_snapshot["balance_due_usd"] = 0.0 if job_snapshot.get("paid") else total_charge_usd
+            job_snapshot["payment_status"] = self._payment_status(
+                bool(job_snapshot.get("charge_enabled", False)),
+                bool(job_snapshot.get("paid", False)),
+                float(job_snapshot.get("balance_due_usd", 0.0)),
+            )
+
+        job_snapshot.pop("started_at_ts", None)
+        return {
+            "active": True,
+            **job_snapshot,
+            "logs": self.active_job_logs,
+        }
 
     # ── Token validation ────────────────────────────────────────────
 
@@ -477,6 +591,13 @@ class HostingService:
             "state": "starting",
             "status_detail": "Accepted job, preparing Docker workspace",
             "started_at": datetime.now().isoformat(),
+            "started_at_ts": start_time,
+            "charge_enabled": request.charge_enabled,
+            "charge_rate_usd_per_hour": request.charge_rate_usd_per_hour,
+            "total_charge_usd": 0.0,
+            "balance_due_usd": 0.0,
+            "paid": request.paid,
+            "payment_status": "not_required" if not request.charge_enabled else "payment_due",
         }
         self.active_job_logs = []
 
@@ -540,7 +661,13 @@ class HostingService:
                         "timeout",
                         "Dependency installation exceeded the configured timeout",
                     )
-                    yield {"type": "error", "message": "Job timed out while installing dependencies", "job_id": request_id}
+                    billing = self._finalize_completed_job(request_id, start_time)
+                    yield {
+                        "type": "error",
+                        "message": "Job timed out while installing dependencies",
+                        "job_id": request_id,
+                        **self._payment_payload(billing),
+                    }
                     return
 
                 await install_process.wait()
@@ -553,11 +680,13 @@ class HostingService:
                         "failed",
                         "Dependency installation failed inside Docker",
                     )
+                    billing = self._finalize_completed_job(request_id, start_time)
                     yield {
                         "type": "done",
                         "job_id": request_id,
                         "exit_code": install_process.returncode,
                         "duration_ms": duration_ms,
+                        **self._payment_payload(billing),
                     }
                     return
 
@@ -586,7 +715,13 @@ class HostingService:
                     "timeout",
                     "Execution exceeded the configured timeout",
                 )
-                yield {"type": "error", "message": "Job timed out", "job_id": request_id}
+                billing = self._finalize_completed_job(request_id, start_time)
+                yield {
+                    "type": "error",
+                    "message": "Job timed out",
+                    "job_id": request_id,
+                    **self._payment_payload(billing),
+                }
                 return
 
             await run_process.wait()
@@ -634,16 +769,24 @@ class HostingService:
                 else f"Docker execution exited with code {run_process.returncode}"
             )
             yield self._build_status_message(request_id, final_state, final_detail)
+            billing = self._finalize_completed_job(request_id, start_time)
             yield {
                 "type": "done",
                 "job_id": request_id,
                 "exit_code": run_process.returncode,
                 "duration_ms": duration_ms,
+                **self._payment_payload(billing),
             }
 
         except Exception as e:
             yield self._build_status_message(request_id, "failed", str(e))
-            yield {"type": "error", "message": str(e), "job_id": request_id}
+            billing = self._finalize_completed_job(request_id, start_time)
+            yield {
+                "type": "error",
+                "message": str(e),
+                "job_id": request_id,
+                **self._payment_payload(billing),
+            }
         finally:
             await self._update_advertised_status(WorkerStatus.IDLE)
             if request_id in self.pending_requests:
@@ -654,8 +797,6 @@ class HostingService:
             ]
             for t in to_remove:
                 del self.active_tokens[t]
-            self.active_job = None
-            self.active_job_logs = []
             temp_dir.cleanup()
 
     async def get_output_if_paid(self, request_id: str) -> dict:

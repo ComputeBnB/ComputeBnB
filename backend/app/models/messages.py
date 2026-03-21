@@ -48,7 +48,10 @@ class JobRequest(BaseModel):
     timeout_secs: int = 300
     status: RequestStatus = RequestStatus.PENDING
     created_at: datetime = datetime.now()
-    paid: bool = False  # Added for mock payment system
+    charge_enabled: bool = False
+    charge_rate_usd_per_hour: float = 0.0
+    paid: bool = False
+    total_charge_usd: float = 0.0
 
 
 # Session token issued after host approves a request
