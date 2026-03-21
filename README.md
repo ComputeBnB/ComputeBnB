@@ -8,8 +8,8 @@ The demo lets one machine discover available worker machines on the same LAN, ch
 
 Build a cross-platform LAN demo where:
 
-- worker machines advertise themselves automatically
-- a client discovers available workers on the network
+- worker machines advertise themselves automatically - each worker is called a `host`
+- a client discovers available workers on the network - each client is called a `guest`
 - the user selects a worker manually
 - the client sends a Python job with a timeout
 - the worker executes it and streams logs back in real time
@@ -42,20 +42,20 @@ Build a cross-platform LAN demo where:
 
 ### Components
 
-#### Worker Agent
+#### Host 
 
-Runs on each executor machine.
+Runs the program of the `guest`.
 
 Responsibilities:
 - advertise itself on the LAN using mDNS
-- expose a TCP server for job execution
-- accept one job at a time
+- expose a TCP server for job (program) execution
+- manually accept one job
 - run Python code
 - stream logs and status updates back to the client
 - enforce job timeout
 - report idle or busy state
 
-#### Client
+#### Guest
 
 A lightweight web UI or local app used by the requester.
 
@@ -81,12 +81,13 @@ Fallback:
 
 ### Discovery: mDNS
 
-Workers advertise a service such as:
+Hosts advertise a service such as:
 
 `_compute-worker._tcp.local`
 
 Each worker publishes metadata like:
 - `worker_id`
+- `ipv4`
 - `display_name`
 - `tcp_port`
 - `status`
@@ -121,7 +122,8 @@ Recommended input:
 - a single Python file as text
 
 Optional later:
-- a zip upload for small Python projects
+- a zipped Python project with `main.py`
+- drag-and-drop folder upload with auto-zip in the UI
 
 Entrypoint:
 - `python main.py`
@@ -189,9 +191,6 @@ Cons:
 
 #### VM
 
-Pros:
-- stronger isolation
-
 Cons:
 - too heavy for an 8-hour build
 - too much platform complexity
@@ -258,8 +257,12 @@ Use newline-delimited JSON over TCP.
 #### Run Job
 
 ```json
-{ "type": "run", "job_id": "job-1", "timeout_secs": 300, "filename": "main.py", "code": "print('hi')" }
+{ "type": "run", "job_id": "job-1", "filename": "main.py", "timeout_secs": 300, "code": "print('hi')" }
 ```
+
+Initial MVP note:
+- support `code` first
+- treat zip project upload as a stretch goal
 
 #### Cancel Job
 
@@ -311,7 +314,7 @@ Use newline-delimited JSON over TCP.
 2. Worker advertises itself via mDNS
 3. Client opens and discovers workers on the LAN
 4. User selects a worker
-5. User pastes or uploads Python code
+5. User pastes Python code or uploads a single file
 6. User sets a timeout
 7. Client sends the job over TCP
 8. Worker starts a Docker container and executes the job
@@ -418,7 +421,7 @@ The MVP is done when:
 - verify Docker early on all worker machines
 - keep subprocess execution as a fallback if Docker slips
 - support only one job at a time per worker
-- support only single-file Python scripts
+- support only single-file Python scripts in the initial MVP
 - test early on real machines
 
 ## Pitch
