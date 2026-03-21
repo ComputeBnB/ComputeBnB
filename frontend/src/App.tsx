@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AppStage, AppMode, Worker, Job, JobResult, JobStatus, HostingRequest } from "./types";
+import {
+  AppStage,
+  AppMode,
+  Worker,
+  WorkerSpecs,
+  Job,
+  JobResult,
+  JobStatus,
+  HostingRequest,
+} from "./types";
 import {
   fetchWorkers,
   fetchWorkerSpecs,
+  fetchLocalSpecs,
   startHosting,
   stopHosting,
   fetchHostingRequests,
@@ -31,6 +41,11 @@ function App() {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [jobStatus, setJobStatus] = useState<JobStatus>("pending");
   const [jobResult, setJobResult] = useState<JobResult | null>(null);
+
+  // Local machine info
+  const [localSpecs, setLocalSpecs] = useState<
+    (WorkerSpecs & { platform?: string }) | null
+  >(null);
 
   // Host state
   const [hostingRequests, setHostingRequests] = useState<HostingRequest[]>([]);
@@ -63,7 +78,7 @@ function App() {
         prev.map((w) => {
           const found = specsResults.find((s) => s.id === w.id);
           return found?.specs ? { ...w, specs: found.specs } : w;
-        })
+        }),
       );
     } catch (err) {
       console.error("Failed to load workers:", err);
@@ -78,6 +93,13 @@ function App() {
       loadWorkers();
     }
   }, [mode, stage, loadWorkers]);
+
+  // Fetch local machine specs once on mount
+  useEffect(() => {
+    fetchLocalSpecs()
+      .then(setLocalSpecs)
+      .catch((err) => console.error("Failed to fetch local specs:", err));
+  }, []);
 
   // ── Guest: Job Submission & Execution ─────────────────────────────
 
@@ -103,7 +125,7 @@ function App() {
         selectedWorker,
         jobData.code,
         jobData.name || "anonymous",
-        jobData.timeoutSecs
+        jobData.timeoutSecs,
       );
 
       const job: Job = {
@@ -159,7 +181,7 @@ function App() {
   const connectWebSocket = (
     worker: Worker,
     requestId: string,
-    token: string
+    token: string,
   ) => {
     const ws = createJobWebSocket(worker, requestId, token);
     wsRef.current = ws;
@@ -178,10 +200,7 @@ function App() {
           if (msg.state === "running") {
             setJobStatus("running");
           }
-          setExecutionLogs((prev) => [
-            ...prev,
-            `[status] ${msg.state}`,
-          ]);
+          setExecutionLogs((prev) => [...prev, `[status] ${msg.state}`]);
           break;
 
         case "stdout":
@@ -209,10 +228,7 @@ function App() {
         case "error":
           if (timerRef.current) clearInterval(timerRef.current);
           setJobStatus("error");
-          setExecutionLogs((prev) => [
-            ...prev,
-            `[error] ${msg.message}`,
-          ]);
+          setExecutionLogs((prev) => [...prev, `[error] ${msg.message}`]);
           setJobResult({
             exitCode: 1,
             runtime: elapsedTime,
@@ -308,7 +324,7 @@ function App() {
     try {
       await approveRequest(requestId);
       setHostingRequests((prev) =>
-        prev.filter((r) => r.request_id !== requestId)
+        prev.filter((r) => r.request_id !== requestId),
       );
     } catch (err) {
       console.error("Failed to approve:", err);
@@ -319,7 +335,7 @@ function App() {
     try {
       await denyRequest(requestId);
       setHostingRequests((prev) =>
-        prev.filter((r) => r.request_id !== requestId)
+        prev.filter((r) => r.request_id !== requestId),
       );
     } catch (err) {
       console.error("Failed to deny:", err);
@@ -376,6 +392,7 @@ function App() {
               <WorkerListScreen
                 workers={workers}
                 loading={workersLoading}
+                localSpecs={localSpecs}
                 onSelectWorker={handleSelectWorker}
                 onStartHosting={handleStartHosting}
                 onRefresh={loadWorkers}

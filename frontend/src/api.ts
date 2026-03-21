@@ -33,7 +33,7 @@ export async function fetchWorkers(): Promise<Worker[]> {
 
 export async function fetchWorkerSpecs(
   host: string,
-  port: number
+  port: number,
 ): Promise<WorkerSpecs> {
   const res = await fetch(`http://${host}:${port}/specs`);
   if (!res.ok) throw new Error("Failed to fetch specs");
@@ -43,6 +43,21 @@ export async function fetchWorkerSpecs(
     cpuCores: data.cpu_cores,
     ram: data.ram,
     gpu: data.gpu ?? undefined,
+  };
+}
+
+export async function fetchLocalSpecs(): Promise<
+  WorkerSpecs & { platform?: string }
+> {
+  const res = await fetch(`${LOCAL_API}/specs`);
+  if (!res.ok) throw new Error("Failed to fetch local specs");
+  const data = await res.json();
+  return {
+    cpu: data.cpu,
+    cpuCores: data.cpu_cores,
+    ram: data.ram,
+    gpu: data.gpu ?? undefined,
+    platform: data.platform ?? undefined,
   };
 }
 
@@ -84,23 +99,22 @@ export async function fetchHostingRequests(): Promise<HostingRequest[]> {
 }
 
 export async function approveRequest(
-  requestId: string
+  requestId: string,
 ): Promise<{ request_id: string; status: string; token: string }> {
   const res = await fetch(
     `${LOCAL_API}/hosting/requests/${requestId}/approve`,
-    { method: "POST" }
+    { method: "POST" },
   );
   if (!res.ok) throw new Error("Failed to approve request");
   return res.json();
 }
 
 export async function denyRequest(
-  requestId: string
+  requestId: string,
 ): Promise<{ request_id: string; status: string }> {
-  const res = await fetch(
-    `${LOCAL_API}/hosting/requests/${requestId}/deny`,
-    { method: "POST" }
-  );
+  const res = await fetch(`${LOCAL_API}/hosting/requests/${requestId}/deny`, {
+    method: "POST",
+  });
   if (!res.ok) throw new Error("Failed to deny request");
   return res.json();
 }
@@ -111,7 +125,7 @@ export async function submitJob(
   worker: { host: string; port: number },
   code: string,
   guestName: string,
-  timeoutSecs: number = 300
+  timeoutSecs: number = 300,
 ): Promise<{ request_id: string; status: string }> {
   const res = await fetch(`${workerApi(worker)}/jobs/request`, {
     method: "POST",
@@ -128,7 +142,7 @@ export async function submitJob(
 
 export async function pollJobStatus(
   worker: { host: string; port: number },
-  requestId: string
+  requestId: string,
 ): Promise<{
   request_id: string;
   status: "pending" | "accepted" | "denied";
@@ -136,7 +150,7 @@ export async function pollJobStatus(
   ws_url?: string;
 }> {
   const res = await fetch(
-    `${workerApi(worker)}/jobs/request/${requestId}/status`
+    `${workerApi(worker)}/jobs/request/${requestId}/status`,
   );
   if (!res.ok) throw new Error("Failed to poll job status");
   return res.json();
@@ -145,7 +159,7 @@ export async function pollJobStatus(
 export function createJobWebSocket(
   worker: { host: string; port: number },
   requestId: string,
-  token: string
+  token: string,
 ): WebSocket {
   const url = `ws://${worker.host}:${worker.port}/jobs/execute/${requestId}?token=${token}`;
   return new WebSocket(url);
