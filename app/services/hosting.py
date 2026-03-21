@@ -44,6 +44,7 @@ class HostingService:
         hostname = socket.gethostname()
 
         # Register mDNS service
+        loop = asyncio.get_event_loop()
         self.zeroconf = Zeroconf()
         self.service_info = ServiceInfo(
             SERVICE_TYPE,
@@ -57,7 +58,7 @@ class HostingService:
                 "platform": platform.system(),
             },
         )
-        self.zeroconf.register_service(self.service_info)
+        await loop.run_in_executor(None, self.zeroconf.register_service, self.service_info)
 
         # Start TCP server for job execution
         self.server_task = asyncio.create_task(self._run_server())
@@ -78,8 +79,9 @@ class HostingService:
 
         # Unregister mDNS service
         if self.zeroconf and self.service_info:
-            self.zeroconf.unregister_service(self.service_info)
-            self.zeroconf.close()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.zeroconf.unregister_service, self.service_info)
+            await loop.run_in_executor(None, self.zeroconf.close)
             self.zeroconf = None
             self.service_info = None
 
