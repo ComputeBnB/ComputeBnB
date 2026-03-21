@@ -23,5 +23,10 @@ fi
 source .venv/bin/activate
 pip install -e . --quiet
 
-# Run
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# Run worker
+echo ""
+echo "======================================"
+echo "  ComputeBnB Worker Starting"
+echo "======================================"
+echo ""
+python worker/test_worker.py

@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import workers, jobs
+from app.routers import workers, jobs, hosting
 from app.services.discovery import discovery_service
+from app.services.hosting import hosting_service
 
 
 @asynccontextmanager
@@ -10,8 +11,9 @@ async def lifespan(app: FastAPI):
     # Startup: begin mDNS discovery
     discovery_service.start()
     yield
-    # Shutdown: stop discovery
+    # Shutdown: stop discovery and hosting
     discovery_service.stop()
+    await hosting_service.stop_hosting()
 
 
 app = FastAPI(
@@ -33,6 +35,7 @@ app.add_middleware(
 # Routers
 app.include_router(workers.router)
 app.include_router(jobs.router)
+app.include_router(hosting.router)
 
 
 @app.get("/health")
