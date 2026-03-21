@@ -1,15 +1,19 @@
 @echo off
 cd /d "%~dp0"
 
-:: Create venv if it doesn't exist
+
+:: Create venv if it doesn't exist, and only install if created
+set venv_created=0
 if not exist ".venv" (
     echo Creating virtual environment...
     python -m venv .venv
+    set venv_created=1
 )
 
-:: Activate and install
 call .venv\Scripts\activate.bat
-pip install -e . --quiet
+if %venv_created%==1 (
+    pip install -e . --quiet
+)
 
 :: Run main app or CLI
 echo.

@@ -94,9 +94,12 @@ async def run_guest():
         print("[Guest] No hosts found.")
         return
 
-    choice = input("Select host to send job to (number): ")
+    choice = input("Select host to send job to (number) or enter -1 to poll again: ")
     try:
         idx = int(choice)
+        if idx == -1:
+            print("[Guest] Polling for hosts again...")
+            return await run_guest()
         host = hosts[idx]
     except (ValueError, IndexError):
         print("Invalid selection.")
