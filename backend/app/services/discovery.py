@@ -68,5 +68,34 @@ class DiscoveryService:
         return {}
 
 
+async def discover_workers(timeout: float = 3.0):
+    """
+    Discover available workers on the LAN using mDNS.
+    Returns a list of dicts with worker info.
+    """
+    results = []
+
+    def on_update():
+        pass  # No-op for CLI
+
+    service = DiscoveryService()
+    service.start(on_update)
+    try:
+        await asyncio.sleep(timeout)
+        workers = service.get_workers()
+        for w in workers.values():
+            results.append({
+                "worker_id": w.worker_id,
+                "display_name": w.display_name,
+                "ip": w.host,
+                "port": w.port,
+                "status": w.status.value,
+                "platform": w.platform,
+            })
+    finally:
+        service.stop()
+    return results
+
+
 # Global instance
 discovery_service = DiscoveryService()

@@ -194,6 +194,19 @@ class HostingService:
         request.status = RequestStatus.DENIED
         return {"request_id": request_id, "status": "denied"}
 
+    def mark_paid(self, request_id: str) -> bool:
+        """Mark a job request as paid."""
+        request = self.pending_requests.get(request_id)
+        if not request:
+            return False
+        request.paid = True
+        return True
+
+    def is_paid(self, request_id: str) -> bool:
+        """Check if a job request is paid."""
+        request = self.pending_requests.get(request_id)
+        return bool(request and getattr(request, 'paid', False))
+
     # ── Token validation ────────────────────────────────────────────
 
     def validate_token(self, token: str) -> Optional[SessionToken]:
@@ -335,6 +348,16 @@ class HostingService:
             self.active_job = None
             self.active_job_logs = []
             temp_dir.cleanup()
+
+    async def get_output_if_paid(self, request_id: str) -> dict:
+        """Return output if paid, else return locked message."""
+        request = self.pending_requests.get(request_id)
+        if not request:
+            return {"status": "error", "message": "Request not found"}
+        if not getattr(request, 'paid', False):
+            return {"status": "locked", "message": "Please pay to unlock the output."}
+        # For demo: just return a placeholder, real output should be loaded from storage
+        return {"status": "ok", "output": getattr(request, 'output', 'Output not available')}
 
     def get_status(self):
         """Get current hosting status."""
