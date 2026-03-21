@@ -17,6 +17,8 @@ BACKEND_PATH = os.path.join(os.path.dirname(__file__), "app")
 # Import backend modules dynamically
 def import_backend_module(module_path, module_name):
     spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module {module_name} from {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -48,13 +50,19 @@ async def run_host():
 
 async def run_guest():
     print("[Guest] Discovering hosts...")
-    hosts = await discovery_mod.discover_workers()
+    discovery_mod.discovery_service.start()
+    try:
+        await asyncio.sleep(2)
+        hosts = list(discovery_mod.discovery_service.get_workers().values())
+    finally:
+        discovery_mod.discovery_service.stop()
+
     if not hosts:
         print("[Guest] No hosts found.")
         return
     print("[Guest] Found hosts:")
     for idx, host in enumerate(hosts):
-        print(f"  [{idx}] {host['display_name']} ({host['ip']}:{host['port']})")
+        print(f"  [{idx}] {host.display_name} ({host.host}:{host.port})")
     choice = input("Select host to send job to (number): ")
     try:
         idx = int(choice)
@@ -66,11 +74,10 @@ async def run_guest():
     # Send job request (simplified, assumes direct API call)
     import requests
     req = {
-        "guest_name": platform.node(),
-        "guest_ip": "0.0.0.0",  # Could use socket.gethostbyname
         "code": code,
+        "guest_name": platform.node(),
     }
-    url = f"http://{host['ip']}:{host['port']}/jobs/submit"
+    url = f"http://{host.host}:{host.port}/jobs/request"
     print(f"[Guest] Sending job to {url}...")
     resp = requests.post(url, json=req)
     print(f"[Guest] Response: {resp.json()}")
