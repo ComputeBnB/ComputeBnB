@@ -3,9 +3,6 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Enforce Python 3.11
-REQUIRED_PYTHON="python3.11"
-
 # Check if python3.11 is available
 if ! command -v $REQUIRED_PYTHON &> /dev/null; then
     echo "Error: Python 3.11 is required but not installed."
