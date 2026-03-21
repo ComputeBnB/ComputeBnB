@@ -204,25 +204,50 @@ If Docker fails on a demo machine or takes too long on one platform, use local s
 
 This should be treated as trusted-demo mode only.
 
-## Cross-Platform Plan
+## Tech Stack
 
-### Worker Agent
+### Backend and Worker
 
-Implement in Go.
+Implement the worker agent and local control logic in Python.
 
-Why:
-- compiles to a single binary
-- strong networking support
+Recommended pieces:
+- `Python 3.11`
+- `zeroconf` for mDNS discovery
+- `socket` or `asyncio` for TCP communication
+- `subprocess` for Docker execution and fallback local execution
+
+Why Python:
+- fastest to build in a hackathon
+- simpler debugging and iteration
+- matches the Python-only execution model
+- easy Docker integration
 - works across macOS, Windows, and Linux
 
 ### Client
 
-Use a browser-based UI.
+Use a browser-based UI with plain HTML, CSS, and JavaScript.
 
 Why:
+- no frontend framework setup overhead
 - no desktop packaging work
 - easiest way to stay cross-platform
 - fast to demo
+
+### Container Runtime
+
+Use Docker as the default execution environment.
+
+Recommended image:
+- `python:3.11-slim`
+
+### Cross-Platform Plan
+
+The system stays cross-platform by using:
+- Python for the worker and backend logic
+- browser UI for the client
+- Docker for a consistent execution environment where available
+
+If Docker is not available on a demo machine, the worker can fall back to local subprocess execution in trusted-demo mode.
 
 ## Protocol
 
