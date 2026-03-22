@@ -602,7 +602,7 @@ function App() {
   return (
     <div className="h-screen w-screen bg-app-bg flex flex-col">
       <div className="flex items-center border-b border-app-border px-8 py-3">
-        <img src={logo} alt="ComputeBnB" className="h-9 w-auto" />
+        <img src={logo} alt="ComputeBnB" className="h-14 w-auto" />
       </div>
 
       {/* Main Content Area */}
