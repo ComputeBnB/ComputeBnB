@@ -148,7 +148,7 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
-        <div className="max-w-7xl space-y-6">
+        <div className="mx-auto w-full max-w-7xl space-y-6">
           <div className="rounded-xl border border-app-border bg-app-surface p-5">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2.5">
