@@ -12,6 +12,7 @@ import secrets
 import time
 import base64
 import shlex
+import shutil
 import tempfile
 from typing import Optional, Dict, AsyncGenerator
 from datetime import datetime, timedelta
@@ -477,21 +478,82 @@ class HostingService:
 
         return returned_files, skipped_paths
 
+    @staticmethod
+    def _docker_volume_path(host_path: str) -> str:
+        """Convert a host path to a format Docker understands on all platforms.
+
+        On Windows, ``C:\\Users\\foo\\tmp`` must become ``/c/Users/foo/tmp``
+        for Docker Desktop (which expects POSIX-style paths for bind mounts).
+        On macOS/Linux the path is returned unchanged.
+        """
+        if platform.system() != "Windows":
+            return host_path
+        # C:\Users\foo -> /c/Users/foo
+        path = host_path.replace("\\", "/")
+        if len(path) >= 2 and path[1] == ":":
+            drive = path[0].lower()
+            path = f"/{drive}{path[2:]}"
+        return path
+
+    @staticmethod
+    def _resolve_docker_executable() -> str:
+        """Find the docker executable on the system, cross-platform."""
+        docker = shutil.which("docker")
+        if docker:
+            return docker
+        if platform.system() == "Windows":
+            common_paths = [
+                Path(r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"),
+                Path(r"C:\ProgramData\DockerDesktop\version-bin\docker.exe"),
+            ]
+            for p in common_paths:
+                if p.is_file():
+                    return str(p)
+        raise FileNotFoundError(
+            "Docker executable not found. Please install Docker Desktop and ensure "
+            "'docker' is available in your system PATH."
+        )
+
+    async def _check_docker_available(self) -> tuple[bool, str]:
+        """Verify Docker is installed and the daemon is running."""
+        try:
+            docker = self._resolve_docker_executable()
+        except FileNotFoundError as e:
+            return False, str(e)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                docker, "info",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            if proc.returncode != 0:
+                hint = stderr.decode(errors="replace").strip().split("\n")[0] if stderr else ""
+                return False, f"Docker daemon is not running. {hint}"
+            return True, docker
+        except asyncio.TimeoutError:
+            return False, "Docker daemon did not respond within 15 seconds."
+        except OSError as e:
+            return False, f"Failed to run Docker: {e}"
+
     async def _start_docker_process(
         self,
         workspace_root: str,
         container_name: str,
         shell_command: str,
+        docker_exe: str = "docker",
         env: Optional[dict[str, str]] = None,
     ):
+        mount_path = self._docker_volume_path(workspace_root)
         docker_command = [
-            "docker",
+            docker_exe,
             "run",
             "--rm",
             "--name",
             container_name,
             "-v",
-            f"{workspace_root}:/workspace",
+            f"{mount_path}:/workspace",
             "-w",
             "/workspace",
         ]
@@ -513,9 +575,9 @@ class HostingService:
             cwd=workspace_root,
         )
 
-    async def _cleanup_container(self, container_name: str) -> None:
+    async def _cleanup_container(self, container_name: str, docker_exe: str = "docker") -> None:
         cleanup = await asyncio.create_subprocess_exec(
-            "docker",
+            docker_exe,
             "rm",
             "-f",
             container_name,
@@ -578,6 +640,13 @@ class HostingService:
         if not request:
             yield {"type": "error", "message": "Request not found"}
             return
+
+        # Verify Docker is available before starting
+        docker_ok, docker_result = await self._check_docker_available()
+        if not docker_ok:
+            yield {"type": "error", "message": f"Docker not available: {docker_result}"}
+            return
+        docker_exe = docker_result
 
         await self._update_advertised_status(WorkerStatus.BUSY)
         start_time = time.time()
@@ -653,6 +722,7 @@ class HostingService:
                     workspace_root,
                     deps_container,
                     install_command,
+                    docker_exe=docker_exe,
                 )
 
                 try:
@@ -662,7 +732,7 @@ class HostingService:
                         yield message
                 except asyncio.TimeoutError:
                     install_process.kill()
-                    await self._cleanup_container(deps_container)
+                    await self._cleanup_container(deps_container, docker_exe=docker_exe)
                     yield self._build_status_message(
                         request_id,
                         "timeout",
@@ -678,7 +748,7 @@ class HostingService:
                     return
 
                 await install_process.wait()
-                await self._cleanup_container(deps_container)
+                await self._cleanup_container(deps_container, docker_exe=docker_exe)
 
                 if install_process.returncode != 0:
                     duration_ms = int((time.time() - start_time) * 1000)
@@ -706,6 +776,7 @@ class HostingService:
                 workspace_root,
                 run_container,
                 f"python {shlex.quote(entrypoint)}",
+                docker_exe=docker_exe,
                 env=runtime_env,
             )
 
@@ -716,7 +787,7 @@ class HostingService:
                     yield message
             except asyncio.TimeoutError:
                 run_process.kill()
-                await self._cleanup_container(run_container)
+                await self._cleanup_container(run_container, docker_exe=docker_exe)
                 yield self._build_status_message(
                     request_id,
                     "timeout",
@@ -732,7 +803,7 @@ class HostingService:
                 return
 
             await run_process.wait()
-            await self._cleanup_container(run_container)
+            await self._cleanup_container(run_container, docker_exe=docker_exe)
 
             generated_files, skipped_generated_files = self._collect_generated_files(
                 workspace_root,
@@ -804,7 +875,15 @@ class HostingService:
             ]
             for t in to_remove:
                 del self.active_tokens[t]
-            temp_dir.cleanup()
+            # Windows may hold file locks briefly after Docker releases the mount
+            for _attempt in range(3):
+                try:
+                    temp_dir.cleanup()
+                    break
+                except (PermissionError, OSError):
+                    await asyncio.sleep(1)
+            else:
+                shutil.rmtree(temp_dir.name, ignore_errors=True)
 
     async def get_output_if_paid(self, request_id: str) -> dict:
         """Return output if paid, else return locked message."""
