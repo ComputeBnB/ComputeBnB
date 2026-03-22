@@ -32,14 +32,7 @@ fi
 source .venv/bin/activate
 pip install -e . --quiet
 
-# Run main app or CLI
+# Run API server
 echo
-echo "Select mode:"
-echo "  1. Run API server (default)"
-echo "  2. Run ComputeBnB CLI"
-read -p "Enter choice [1/2]: " mode
-if [ "$mode" = "2" ]; then
-    python cli.py
-else
-    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-fi
+echo "Starting API server..."
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
