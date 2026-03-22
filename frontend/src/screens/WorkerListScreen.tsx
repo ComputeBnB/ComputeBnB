@@ -343,14 +343,14 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
 
           {/* Other Workers */}
           {loading && workers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
+            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 py-16">
               <Loader2 size={32} className="text-app-accent animate-spin" />
               <p className="text-sm text-app-text-secondary">
                 Scanning local network...
               </p>
             </div>
           ) : workers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
+            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 py-16">
               <Wifi size={48} className="text-app-text-tertiary" />
               <div className="text-center">
                 <p className="text-app-text-secondary mb-1">
@@ -362,7 +362,7 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
               </div>
             </div>
           ) : filteredWorkers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
+            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 py-16">
               <Wifi size={48} className="text-app-text-tertiary" />
               <div className="text-center">
                 <p className="text-app-text-secondary mb-1">
