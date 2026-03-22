@@ -1,7 +1,27 @@
 import React from "react";
-import { Wifi, RefreshCw, Server, Loader2, Monitor, Cpu, HardDrive, Layers } from "lucide-react";
+import {
+  Wifi,
+  RefreshCw,
+  Server,
+  Loader2,
+  Monitor,
+  Cpu,
+  HardDrive,
+  Layers,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { Worker, WorkerSpecs } from "../types";
 import { WorkerCard } from "../components/WorkerCard";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Checkbox } from "../components/ui/checkbox";
+import { Label } from "../components/ui/label";
 
 function parseRamToGb(ram: string | undefined): number {
   if (!ram) return 0;
@@ -114,75 +134,159 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
         </div>
         <div className="h-4 w-px bg-app-border" />
         <span className="text-sm text-app-text-secondary">
-          {hasActiveFilters ? `${filteredWorkers.length} match filters` : `${availableCount} available`}
+          {hasActiveFilters
+            ? `${filteredWorkers.length} match filters`
+            : `${availableCount} available`}
         </span>
         <div className="h-4 w-px bg-app-border" />
         <span className="text-sm text-app-text-secondary">
-          {hasActiveFilters ? `${filteredAvailableCount} available` : "No filters"}
+          {hasActiveFilters
+            ? `${filteredAvailableCount} available`
+            : "No filters"}
         </span>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
         <div className="max-w-7xl space-y-6">
-          <div className="rounded-lg border border-app-border bg-app-surface p-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-app-text">Filter by specs</h3>
-                <p className="text-sm text-app-text-secondary">
-                  Narrow the list to computers that fit your job.
-                </p>
+          <div className="rounded-xl border border-app-border bg-app-surface p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-app-accent/10">
+                  <SlidersHorizontal size={15} className="text-app-accent" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-app-text">
+                    Filters
+                  </h3>
+                  <p className="text-xs text-app-text-tertiary">
+                    Narrow down by hardware specs
+                  </p>
+                </div>
               </div>
               {hasActiveFilters && (
                 <button
                   onClick={clearFilters}
-                  className="text-sm text-app-accent hover:text-app-accent-hover transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-app-text-secondary hover:text-app-text bg-app-surface-elevated hover:bg-app-border/50 border border-app-border transition-colors"
                 >
-                  Clear filters
+                  <X size={12} />
+                  Clear
                 </button>
               )}
             </div>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <label className="space-y-2 text-sm">
-                <span className="block text-app-text-secondary">Min CPU cores</span>
-                <select
-                  value={minCpuCores}
-                  onChange={(e) => setMinCpuCores(Number(e.target.value))}
-                  className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text focus:outline-none focus:border-app-accent"
-                >
-                  <option value={0}>Any</option>
-                  <option value={4}>4+</option>
-                  <option value={8}>8+</option>
-                  <option value={12}>12+</option>
-                  <option value={16}>16+</option>
-                </select>
-              </label>
 
-              <label className="space-y-2 text-sm">
-                <span className="block text-app-text-secondary">Min RAM</span>
-                <select
-                  value={minRamGb}
-                  onChange={(e) => setMinRamGb(Number(e.target.value))}
-                  className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-app-text focus:outline-none focus:border-app-accent"
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <Cpu size={12} className="text-app-text-tertiary" />
+                  Min CPU Cores
+                </Label>
+                <Select
+                  value={String(minCpuCores)}
+                  onValueChange={(v) => setMinCpuCores(Number(v))}
                 >
-                  <option value={0}>Any</option>
-                  <option value={8}>8 GB+</option>
-                  <option value={16}>16 GB+</option>
-                  <option value={32}>32 GB+</option>
-                  <option value={64}>64 GB+</option>
-                </select>
-              </label>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Any</SelectItem>
+                    <SelectItem value="4">4+ cores</SelectItem>
+                    <SelectItem value="8">8+ cores</SelectItem>
+                    <SelectItem value="12">12+ cores</SelectItem>
+                    <SelectItem value="16">16+ cores</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-              <label className="flex items-center gap-3 rounded-lg border border-app-border bg-app-bg px-3 py-2.5 text-sm text-app-text">
-                <input
-                  type="checkbox"
-                  checked={gpuOnly}
-                  onChange={(e) => setGpuOnly(e.target.checked)}
-                  className="h-4 w-4 rounded border-app-border bg-app-surface text-app-accent focus:ring-app-accent"
-                />
-                <span>Only show workers with a GPU</span>
-              </label>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <HardDrive size={12} className="text-app-text-tertiary" />
+                  Min RAM
+                </Label>
+                <Select
+                  value={String(minRamGb)}
+                  onValueChange={(v) => setMinRamGb(Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Any</SelectItem>
+                    <SelectItem value="8">8 GB+</SelectItem>
+                    <SelectItem value="16">16 GB+</SelectItem>
+                    <SelectItem value="32">32 GB+</SelectItem>
+                    <SelectItem value="64">64 GB+</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <Layers size={12} className="text-app-text-tertiary" />
+                  GPU
+                </Label>
+                <div
+                  className="flex items-center gap-3 h-9 rounded-lg border border-app-border bg-app-bg px-3 cursor-pointer"
+                  onClick={() => setGpuOnly(!gpuOnly)}
+                >
+                  <Checkbox
+                    id="gpu-filter"
+                    checked={gpuOnly}
+                    onCheckedChange={(checked) => setGpuOnly(checked === true)}
+                  />
+                  <Label
+                    htmlFor="gpu-filter"
+                    className="text-sm text-app-text cursor-pointer select-none"
+                  >
+                    GPU required
+                  </Label>
+                </div>
+              </div>
             </div>
+
+            {hasActiveFilters && (
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                {minCpuCores > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-app-accent/10 border border-app-accent/20 text-xs text-app-accent">
+                    <Cpu size={10} />
+                    {minCpuCores}+ cores
+                    <button
+                      onClick={() => setMinCpuCores(0)}
+                      className="ml-0.5 hover:text-white transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )}
+                {minRamGb > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-app-accent/10 border border-app-accent/20 text-xs text-app-accent">
+                    <HardDrive size={10} />
+                    {minRamGb} GB+
+                    <button
+                      onClick={() => setMinRamGb(0)}
+                      className="ml-0.5 hover:text-white transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )}
+                {gpuOnly && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-app-accent/10 border border-app-accent/20 text-xs text-app-accent">
+                    <Layers size={10} />
+                    GPU required
+                    <button
+                      onClick={() => setGpuOnly(false)}
+                      className="ml-0.5 hover:text-white transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )}
+                <span className="text-xs text-app-text-tertiary ml-1">
+                  {filteredWorkers.length} of {workers.length} workers
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Your Computer Card */}
@@ -201,25 +305,35 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
                       {window.location.hostname || "This Machine"}
                     </div>
                     {localSpecs.platform && (
-                      <div className="text-xs text-app-text-tertiary">{localSpecs.platform}</div>
+                      <div className="text-xs text-app-text-tertiary">
+                        {localSpecs.platform}
+                      </div>
                     )}
                   </div>
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-sm">
                     <Cpu size={14} className="text-app-text-tertiary" />
-                    <span className="text-app-text-secondary">{localSpecs.cpu}</span>
-                    <span className="text-app-text-tertiary ml-auto">{localSpecs.cpuCores} cores</span>
+                    <span className="text-app-text-secondary">
+                      {localSpecs.cpu}
+                    </span>
+                    <span className="text-app-text-tertiary ml-auto">
+                      {localSpecs.cpuCores} cores
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <HardDrive size={14} className="text-app-text-tertiary" />
                     <span className="text-app-text-secondary">RAM</span>
-                    <span className="text-app-text-tertiary ml-auto">{localSpecs.ram}</span>
+                    <span className="text-app-text-tertiary ml-auto">
+                      {localSpecs.ram}
+                    </span>
                   </div>
                   {localSpecs.gpu && (
                     <div className="flex items-center gap-2 text-sm">
                       <Layers size={14} className="text-app-text-tertiary" />
-                      <span className="text-app-text-secondary truncate">{localSpecs.gpu}</span>
+                      <span className="text-app-text-secondary truncate">
+                        {localSpecs.gpu}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -239,7 +353,9 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
             <div className="flex flex-col items-center justify-center py-16 gap-4">
               <Wifi size={48} className="text-app-text-tertiary" />
               <div className="text-center">
-                <p className="text-app-text-secondary mb-1">No other workers found</p>
+                <p className="text-app-text-secondary mb-1">
+                  No other workers found
+                </p>
                 <p className="text-sm text-app-text-tertiary">
                   Make sure other computers are running ComputeBnB in host mode
                 </p>
@@ -249,7 +365,9 @@ export const WorkerListScreen: React.FC<WorkerListScreenProps> = ({
             <div className="flex flex-col items-center justify-center py-16 gap-4">
               <Wifi size={48} className="text-app-text-tertiary" />
               <div className="text-center">
-                <p className="text-app-text-secondary mb-1">No workers match these filters</p>
+                <p className="text-app-text-secondary mb-1">
+                  No workers match these filters
+                </p>
                 <p className="text-sm text-app-text-tertiary">
                   Try lowering the CPU or RAM minimum, or turn off GPU only.
                 </p>

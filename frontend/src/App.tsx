@@ -290,7 +290,9 @@ function App() {
           setJobPhaseDetail(msg.detail ?? null);
           setExecutionLogs((prev) => [
             ...prev,
-            msg.detail ? `[status] ${msg.state}: ${msg.detail}` : `[status] ${msg.state}`,
+            msg.detail
+              ? `[status] ${msg.state}: ${msg.detail}`
+              : `[status] ${msg.state}`,
           ]);
           break;
 
@@ -339,7 +341,9 @@ function App() {
             paid: msg.paid ?? false,
             paymentStatus:
               msg.payment_status ??
-              ((msg.charge_enabled ?? chargeEnabled) ? "payment_due" : "not_required"),
+              ((msg.charge_enabled ?? chargeEnabled)
+                ? "payment_due"
+                : "not_required"),
           });
           setCurrentJob((prev) =>
             prev && prev.requestId === requestId
@@ -366,8 +370,16 @@ function App() {
 
         case "error":
           if (timerRef.current) clearInterval(timerRef.current);
-          setJobStatus(msg.message?.toLowerCase().includes("timed out") ? "timeout" : "error");
-          setJobPhase(msg.message?.toLowerCase().includes("timed out") ? "timeout" : "error");
+          setJobStatus(
+            msg.message?.toLowerCase().includes("timed out")
+              ? "timeout"
+              : "error",
+          );
+          setJobPhase(
+            msg.message?.toLowerCase().includes("timed out")
+              ? "timeout"
+              : "error",
+          );
           setJobPhaseDetail(msg.message);
           setExecutionLogs((prev) => [...prev, `[error] ${msg.message}`]);
           setJobResult({
@@ -384,7 +396,9 @@ function App() {
             paid: msg.paid ?? false,
             paymentStatus:
               msg.payment_status ??
-              ((msg.charge_enabled ?? chargeEnabled) ? "payment_due" : "not_required"),
+              ((msg.charge_enabled ?? chargeEnabled)
+                ? "payment_due"
+                : "not_required"),
           });
           setCurrentJob((prev) =>
             prev && prev.requestId === requestId
@@ -527,7 +541,13 @@ function App() {
   };
 
   const handlePayForJob = async () => {
-    if (!selectedWorker || !currentJob || !jobResult || !jobResult.chargeEnabled || jobResult.paid) {
+    if (
+      !selectedWorker ||
+      !currentJob ||
+      !jobResult ||
+      !jobResult.chargeEnabled ||
+      jobResult.paid
+    ) {
       return;
     }
 
@@ -580,35 +600,13 @@ function App() {
 
   return (
     <div className="h-screen w-screen bg-app-bg flex flex-col">
-      {/* App Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-app-surface-elevated border-b border-app-border">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-app-accent to-blue-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">CB</span>
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-app-text">ComputeBnB</h1>
-            <p className="text-xs text-app-text-tertiary">
-              Local Compute Sharing
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="px-2 py-1 rounded-md bg-app-surface border border-app-border">
-            <span className="text-xs text-app-text-secondary font-mono">
-              v0.1.0
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden">
         {mode === "host" ? (
-              <HostModeScreen
-                onStopHosting={handleStopHosting}
-                requests={hostingRequests}
-                onApprove={handleApproveRequest}
+          <HostModeScreen
+            onStopHosting={handleStopHosting}
+            requests={hostingRequests}
+            onApprove={handleApproveRequest}
             onDeny={handleDenyRequest}
             hostIp={hostIp}
             activeJob={activeJob}
