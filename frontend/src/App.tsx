@@ -31,6 +31,7 @@ import { SubmitJobScreen } from "./screens/SubmitJobScreen";
 import { JobExecutionScreen } from "./screens/JobExecutionScreen";
 import { JobCompleteScreen } from "./screens/JobCompleteScreen";
 import { HostModeScreen } from "./screens/HostModeScreen";
+import logo from "./assets/computebnb-logo.png";
 
 const MINIMUM_DEMO_CHARGE_USD = 0.25;
 
@@ -600,6 +601,10 @@ function App() {
 
   return (
     <div className="h-screen w-screen bg-app-bg flex flex-col">
+      <div className="flex items-center border-b border-app-border px-8 py-3">
+        <img src={logo} alt="ComputeBnB" className="h-9 w-auto" />
+      </div>
+
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden">
         {mode === "host" ? (
